@@ -1,0 +1,1998 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FaceMorph PRO</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+/* ─────────────────────────────────────────────────────────
+   TOKENS
+───────────────────────────────────────────────────────── */
+:root {
+  --bg:   #08080f; --s1: #0f0f18; --s2: #161622;
+  --s3:   #1e1e2e; --s4: #2a2a3e;
+  --b1: rgba(255,255,255,.05); --b2: rgba(255,255,255,.09); --b3: rgba(255,255,255,.14);
+  --tx: #f0f0fa; --tx2: #9090b0; --tx3: #60607a; --tx4: #404058;
+  --in: #5a5cf5; --in2: #818cf8; --in3: #c7d2fe; --inglow: rgba(90,92,245,.3);
+  --live: #22c55e; --proc: #3b82f6; --idle: #404058; --warn: #f59e0b; --err: #ef4444;
+  --nav-h: 52px; --side-w: 288px; --r: 9px; --t: .18s;
+}
+*,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+html,body { height:100%; overflow:hidden; }
+body {
+  background: var(--bg);
+  color: var(--tx);
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 13px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; }
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: var(--s4); border-radius: 3px; }
+
+/* ─────────────────────────────────────────────────────────
+   TOPNAV
+───────────────────────────────────────────────────────── */
+.nav {
+  position: fixed; top:0; left:0; right:0; z-index:100;
+  height: var(--nav-h);
+  background: rgba(8,8,15,.88);
+  backdrop-filter: blur(14px) saturate(1.5);
+  border-bottom: 1px solid var(--b1);
+  display: flex; align-items: center; gap: .75rem; padding: 0 1.1rem;
+}
+.nav-logo { display:flex; align-items:center; gap:.5rem; text-decoration:none; margin-right:.85rem; }
+.nav-logo-icon {
+  width:24px; height:24px; border-radius:6px;
+  background: linear-gradient(135deg, var(--in), #9b9bf0);
+  display:grid; place-items:center;
+  font-family:'JetBrains Mono',monospace; font-size:.72rem; font-weight:600; color:#fff;
+}
+.nav-logo-name { font-weight:700; font-size:.9rem; letter-spacing:-.02em; }
+.nav-ver {
+  font-family:'JetBrains Mono',monospace; font-size:.58rem;
+  color: var(--tx3); letter-spacing:.1em; margin-right:1rem;
+}
+.nav-pills { display:flex; gap:1px; background:var(--s2); border:1px solid var(--b2); border-radius:8px; padding:2px; }
+.nav-pill {
+  padding:.3rem .85rem; border-radius:6px; border:none;
+  font-size:.75rem; font-weight:500; color:var(--tx3);
+  background:transparent; transition: all var(--t);
+}
+.nav-pill:hover { color:var(--tx2); background:var(--s3); }
+.nav-pill.active { background:var(--s4); color:var(--tx); }
+
+/* Status badge */
+.nav-badge {
+  margin-left:.85rem;
+  display:inline-flex; align-items:center; gap:.38rem;
+  padding:.26rem .7rem; border-radius:99px; border:1px solid var(--b2);
+  font-family:'JetBrains Mono',monospace; font-size:.68rem;
+  transition: all .4s;
+}
+.badge-dot { width:5px; height:5px; border-radius:50%; background:var(--idle); transition:all .4s; }
+.nav-badge.proc { border-color:rgba(59,130,246,.25); color:#93c5fd; }
+.nav-badge.proc .badge-dot { background:var(--proc); animation: p-blue 1.8s ease infinite; }
+.nav-badge.live { border-color:rgba(34,197,94,.25); color:#86efac; }
+.nav-badge.live .badge-dot { background:var(--live); animation: p-green 2.2s ease infinite; }
+@keyframes p-blue  { 0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,.5)} 50%{box-shadow:0 0 0 4px rgba(59,130,246,0)} }
+@keyframes p-green { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}  50%{box-shadow:0 0 0 5px rgba(34,197,94,0)}  }
+
+.nav-spacer { flex:1; }
+.nav-actions { display:flex; gap:.45rem; }
+.nav-btn {
+  padding:.34rem .85rem; border-radius:7px; border:1px solid var(--b2);
+  background:transparent; color:var(--tx2); font-size:.75rem; font-weight:500;
+  transition: all var(--t);
+}
+.nav-btn:hover { background:var(--s2); color:var(--tx); border-color:var(--b3); }
+.nav-btn.pr {
+  background: var(--in); border-color:transparent; color:#fff; font-weight:600;
+}
+.nav-btn.pr:hover { background:var(--in2); box-shadow:0 0 0 2px var(--inglow); }
+
+/* ─────────────────────────────────────────────────────────
+   ROOT LAYOUT
+───────────────────────────────────────────────────────── */
+.shell { display:flex; height:100vh; padding-top:var(--nav-h); }
+.main  { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.content { flex:1; overflow-y:auto; padding:1.1rem; }
+
+/* PAGE SYSTEM */
+.page { display:none; height:100%; }
+.page.active {
+  display:flex; flex-direction:column; gap:.65rem;
+  animation: pg-in .22s ease both;
+}
+@keyframes pg-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+#page-hub.active { display:block; overflow-y:auto; }
+
+/* ─────────────────────────────────────────────────────────
+   HUB PAGE
+───────────────────────────────────────────────────────── */
+.hub-wrap { max-width:880px; margin:0 auto; padding:.4rem; }
+.hub-hero {
+  background:var(--s1); border:1px solid var(--b1);
+  border-radius:13px; padding:1.5rem 1.75rem;
+  margin-bottom:1.2rem; position:relative; overflow:hidden;
+}
+.hub-hero::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(ellipse at 80% -10%, rgba(90,92,245,.16) 0%, transparent 55%),
+    radial-gradient(ellipse at 0% 110%,  rgba(34,197,94,.07) 0%, transparent 55%);
+}
+.hub-hero h1 {
+  font-size:1.45rem; font-weight:700; letter-spacing:-.03em;
+  line-height:1.2; position:relative;
+}
+.hub-hero h1 em {
+  font-style:normal;
+  background: linear-gradient(135deg, var(--in2), var(--in3));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.hub-hero p { color:var(--tx2); font-size:.82rem; margin-top:.45rem; max-width:440px; line-height:1.65; position:relative; }
+.hub-chips { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.8rem; position:relative; }
+.hub-chip {
+  font-size:.63rem; font-weight:500; padding:.2rem .6rem;
+  border-radius:99px; border:1px solid; letter-spacing:.03em;
+}
+.hc-i { border-color:rgba(99,102,241,.3); background:rgba(99,102,241,.08); color:var(--in2); }
+.hc-g { border-color:rgba(34,197,94,.3); background:rgba(34,197,94,.08); color:#86efac; }
+.hc-b { border-color:rgba(59,130,246,.3); background:rgba(59,130,246,.08); color:#93c5fd; }
+
+.hub-sh { display:flex; align-items:center; justify-content:space-between; margin:1.2rem 0 .65rem; }
+.hub-sh-t { font-weight:600; font-size:.82rem; }
+.hub-sh-a { font-size:.72rem; color:var(--in2); cursor:pointer; }
+.hub-sh-a:hover { text-decoration:underline; }
+
+/* ── TOOL CARDS GRID ── */
+.tools-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(172px, 1fr)); gap:.72rem; }
+.tc {
+  background:var(--s1); border:1px solid var(--b1);
+  border-radius:11px; overflow:hidden; cursor:pointer;
+  display:flex; flex-direction:column;
+  transition: border-color var(--t), box-shadow var(--t), transform var(--t);
+}
+.tc:hover {
+  border-color: var(--b3); transform:translateY(-2px);
+  box-shadow: 0 8px 28px rgba(0,0,0,.45);
+}
+
+/* ── THUMBNAIL — glassmorphism label, no emoji ── */
+.tc-thumb {
+  height: 86px; position:relative; overflow:hidden;
+}
+
+/* Noise texture for premium grain depth */
+.tc-thumb::before {
+  content:''; position:absolute; inset:0; z-index:1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  opacity:.05; pointer-events:none;
+}
+
+/* Gradient fade-up overlay */
+.tc-thumb-overlay {
+  position:absolute; inset:0; z-index:2;
+  background: linear-gradient(to top, rgba(0,0,0,.62) 0%, rgba(0,0,0,.1) 55%, rgba(0,0,0,0) 100%);
+  display:flex; align-items:flex-end; padding:.62rem .72rem;
+}
+
+/* Label: JetBrains Mono, uppercase, letter-spacing — transitions on hover */
+.tc-thumb-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .58rem; font-weight: 500;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.72);
+  line-height: 1;
+  transition: color var(--t), opacity var(--t);
+  position:relative; z-index:3;
+}
+.tc:hover .tc-thumb-label { color: rgba(255,255,255,1); }
+
+/* Thin accent line above label */
+.tc-thumb-overlay::before {
+  content:'';
+  position:absolute; bottom:2.1rem; left:.72rem;
+  width:16px; height:1px; background:rgba(255,255,255,.22);
+  transition: width var(--t);
+}
+.tc:hover .tc-thumb-overlay::before { width:28px; }
+
+.tc-body { padding:.75rem; flex:1; display:flex; flex-direction:column; }
+.tc-row { display:flex; align-items:flex-start; justify-content:space-between; gap:.4rem; }
+.tc-name { font-weight:600; font-size:.8rem; letter-spacing:-.01em; }
+.tc-desc { font-size:.68rem; color:var(--tx3); line-height:1.5; margin-top:.28rem; flex:1; }
+.tc-foot {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-top:.58rem; padding-top:.5rem; border-top:1px solid var(--b1);
+}
+.tc-tag { font-size:.6rem; color:var(--tx4); padding:.1rem .38rem; background:var(--s2); border-radius:4px; letter-spacing:.04em; }
+.tc-go {
+  font-size:.68rem; font-weight:600; color:var(--in2);
+  padding:.22rem .55rem; border-radius:5px;
+  background:rgba(99,102,241,.12); border:1px solid rgba(99,102,241,.2);
+  transition: all var(--t);
+}
+.tc-go:hover { background:rgba(99,102,241,.22); }
+.tc-go.soon { color:var(--tx3); background:var(--s2); border-color:var(--b2); cursor:default; }
+.badge-pill { font-size:.57rem; font-weight:700; padding:.12rem .38rem; border-radius:99px; letter-spacing:.04em; }
+.bp-hot  { background:rgba(239,68,68,.12); color:#fca5a5; border:1px solid rgba(239,68,68,.2); }
+.bp-new  { background:rgba(99,102,241,.12); color:var(--in2); border:1px solid rgba(99,102,241,.2); }
+.bp-beta { background:rgba(245,158,11,.1); color:#fcd34d; border:1px solid rgba(245,158,11,.2); }
+
+/* Gradient backgrounds for thumbs */
+.g1{background:linear-gradient(135deg,#1a183a,#3b3a8c)}
+.g2{background:linear-gradient(135deg,#0f2a1a,#146b3a)}
+.g3{background:linear-gradient(135deg,#0d1e38,#1a4a8c)}
+.g4{background:linear-gradient(135deg,#261505,#7a3a08)}
+.g5{background:linear-gradient(135deg,#140d28,#3a1a6e)}
+.g6{background:linear-gradient(135deg,#04181a,#086060)}
+
+/* Recent row */
+.recent-row { display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:.5rem; }
+.rc {
+  background:var(--s1); border:1px solid var(--b1);
+  border-radius:8px; overflow:hidden; cursor:pointer; transition:all var(--t);
+}
+.rc:hover { border-color:var(--b3); }
+.rc-img {
+  height:60px; position:relative; overflow:hidden;
+  display:flex; align-items:flex-end; padding:.4rem .5rem;
+}
+.rc-img-label {
+  font-family:'JetBrains Mono',monospace;
+  font-size:.52rem; letter-spacing:.12em; text-transform:uppercase;
+  color:rgba(255,255,255,.55); line-height:1; position:relative; z-index:2;
+}
+.rc-img::after {
+  content:''; position:absolute; inset:0;
+  background: linear-gradient(to top, rgba(0,0,0,.55) 0%, rgba(0,0,0,0) 60%);
+  z-index:1;
+}
+.rc-lbl { padding:.3rem .5rem; font-size:.62rem; color:var(--tx3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* ─────────────────────────────────────────────────────────
+   CANVAS AREA
+───────────────────────────────────────────────────────── */
+.cv-shell {
+  flex:1; min-height:0; position:relative;
+  border-radius:11px; overflow:hidden;
+  background:#000; border:1px solid var(--b1);
+}
+.cv-shell canvas { width:100%; height:100%; object-fit:cover; display:block; }
+
+/* Screenshot flash overlay */
+.cv-flash {
+  position:absolute; inset:0; z-index:30;
+  background:rgba(255,255,255,.9);
+  pointer-events:none; opacity:0;
+  border-radius:11px;
+}
+.cv-flash.fire { animation: flash .35s ease-out forwards; }
+@keyframes flash {
+  0%   { opacity:.9; }
+  100% { opacity:0; }
+}
+
+/* Canvas HUD */
+.cv-hud { position:absolute; inset:0; z-index:5; pointer-events:none; display:flex; flex-direction:column; justify-content:space-between; padding:.7rem; }
+.cv-hud-top { display:flex; align-items:flex-start; justify-content:space-between; }
+.cv-hud-bot { display:flex; align-items:flex-end; justify-content:space-between; }
+
+.cv-badge {
+  display:inline-flex; align-items:center; gap:.35rem;
+  background:rgba(8,8,15,.82); backdrop-filter:blur(8px);
+  border:1px solid var(--b2); border-radius:99px;
+  padding:.26rem .65rem; font-size:.66rem;
+  font-family:'JetBrains Mono',monospace; color:var(--tx3); transition:all .4s;
+}
+.cv-badge .badge-dot { width:5px; height:5px; border-radius:50%; background:var(--idle); transition:all .4s; }
+.cv-badge.proc .badge-dot { background:var(--proc); animation:p-blue 1.8s ease infinite; }
+.cv-badge.proc { border-color:rgba(59,130,246,.2); color:#93c5fd; }
+.cv-badge.live .badge-dot { background:var(--live); animation:p-green 2.2s ease infinite; }
+.cv-badge.live { border-color:rgba(34,197,94,.2); color:#86efac; }
+
+.cv-metric {
+  background:rgba(8,8,15,.82); backdrop-filter:blur(8px);
+  border:1px solid var(--b2); border-radius:6px;
+  padding:.2rem .52rem; font-size:.62rem;
+  font-family:'JetBrains Mono',monospace; color:var(--tx3);
+}
+
+/* Canvas Loader */
+.cv-loader {
+  position:absolute; inset:0; z-index:20;
+  background:rgba(8,8,15,.92); backdrop-filter:blur(4px);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.65rem;
+  border-radius:11px;
+}
+.cv-loader.hide { display:none; }
+.ld-ring {
+  width:32px; height:32px; border-radius:50%;
+  border:1.5px solid var(--b2); border-top-color:var(--in2);
+  animation: spin .7s linear infinite;
+}
+.ld-ring.g { border-top-color:var(--live); }
+@keyframes spin { to { transform:rotate(360deg); } }
+.ld-txt { font-size:.7rem; color:var(--tx3); letter-spacing:.09em; font-family:'JetBrains Mono',monospace; }
+
+/* ─────────────────────────────────────────────────────────
+   FLOATING DOCK — SVG buttons, auto-hide, record pulse
+───────────────────────────────────────────────────────── */
+.cv-dock {
+  position:absolute;
+  bottom:.88rem;
+  left:50%;
+  z-index:10;
+  display:flex; align-items:center; gap:1px;
+  padding:5px 7px;
+  background:rgba(8,8,15,.80);
+  backdrop-filter:blur(20px) saturate(1.7);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.055) inset;
+  pointer-events:auto;
+  /* auto-hide transition */
+  transform: translateX(-50%) translateY(0);
+  opacity:1;
+  transition: opacity .32s cubic-bezier(.4,0,.2,1), transform .32s cubic-bezier(.4,0,.2,1);
+  animation: dock-in .4s cubic-bezier(.34,1.56,.64,1) both;
+}
+@keyframes dock-in {
+  from { opacity:0; transform:translateX(-50%) translateY(14px); }
+  to   { opacity:1; transform:translateX(-50%) translateY(0); }
+}
+.cv-dock.hidden {
+  opacity:0;
+  transform:translateX(-50%) translateY(14px);
+  pointer-events:none;
+}
+
+/* Dock button */
+.dk-btn {
+  width:38px; height:38px;
+  display:grid; place-items:center;
+  border-radius:9px; border:none;
+  background:transparent; color:rgba(255,255,255,.6);
+  cursor:pointer; position:relative;
+  transition: background .15s, color .15s, transform .18s cubic-bezier(.34,1.56,.64,1);
+}
+.dk-btn:hover {
+  background:rgba(255,255,255,.1);
+  color:rgba(255,255,255,.95);
+  transform:scale(1.18) translateY(-2px);
+}
+.dk-btn:active { transform:scale(.94); }
+
+/* SVG inside dock */
+.dk-btn svg {
+  width:16px; height:16px;
+  stroke:currentColor; stroke-width:1.5;
+  stroke-linecap:round; stroke-linejoin:round;
+  fill:none; pointer-events:none;
+  transition:stroke .15s;
+}
+/* Filled elements within SVG */
+.dk-btn svg .filled { fill:currentColor; stroke:none; }
+
+/* Tooltip */
+.dk-btn::after {
+  content:attr(data-tip);
+  position:absolute; bottom:calc(100% + 8px); left:50%;
+  transform:translateX(-50%) translateY(4px);
+  background:rgba(10,10,18,.96); border:1px solid rgba(255,255,255,.1);
+  color:#e8e8f8; font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:.63rem; font-weight:500;
+  padding:.18rem .52rem; border-radius:6px;
+  white-space:nowrap; pointer-events:none;
+  opacity:0; transition:opacity .14s, transform .14s;
+}
+.dk-btn:hover::after { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* Separator */
+.dk-sep { width:1px; height:20px; background:rgba(255,255,255,.1); margin:0 3px; flex-shrink:0; }
+
+/* Record — pulse red ring */
+.dk-btn.recording {
+  background:rgba(239,68,68,.18) !important;
+  color:rgba(239,68,68,.9) !important;
+  animation: rec-glow 1.3s ease infinite;
+}
+.dk-btn.recording::before {
+  content:''; position:absolute; inset:5px; border-radius:50%;
+  background:var(--err); opacity:.3;
+  animation: rec-ring 1.3s ease infinite;
+}
+@keyframes rec-glow { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.5)} 50%{box-shadow:0 0 0 6px rgba(239,68,68,0)} }
+@keyframes rec-ring { 0%,100%{transform:scale(1);opacity:.3} 50%{transform:scale(1.35);opacity:0} }
+
+/* Dim landmark btn by default, full when active */
+.dk-btn.dim { color:rgba(255,255,255,.3); }
+.dk-btn.dim:hover { color:rgba(255,255,255,.9); }
+
+/* Stats strip */
+.stats-strip { display:flex; gap:.5rem; flex-shrink:0; }
+.stat-chip {
+  flex:1; background:var(--s1); border:1px solid var(--b1);
+  border-radius:var(--r); padding:.5rem .75rem;
+  display:flex; align-items:center; justify-content:space-between;
+}
+.sc-lbl { font-size:.62rem; color:var(--tx3); letter-spacing:.07em; text-transform:uppercase; }
+.sc-val { font-family:'JetBrains Mono',monospace; font-size:.88rem; font-weight:500; color:var(--in2); }
+.sc-val.g { color:var(--live); }
+
+/* Warp bar */
+.warp-bar {
+  display:none; align-items:center; gap:.5rem;
+  padding:.42rem .75rem; background:var(--s1); border:1px solid var(--b1);
+  border-radius:var(--r); font-size:.68rem; color:var(--tx3);
+  font-family:'JetBrains Mono',monospace;
+}
+.wb-dot { width:5px; height:5px; border-radius:50%; background:var(--tx4); flex-shrink:0; }
+.wb-dot.ok   { background:var(--live); box-shadow:0 0 4px var(--live); }
+.wb-dot.warn { background:var(--warn); box-shadow:0 0 4px var(--warn); }
+.luma-dot { width:6px; height:6px; border-radius:50%; background:var(--tx4); flex-shrink:0; margin-left:auto; transition:background .8s,box-shadow .8s; }
+
+/* ─────────────────────────────────────────────────────────
+   SIDEBAR
+───────────────────────────────────────────────────────── */
+.sidebar {
+  width:var(--side-w); min-width:var(--side-w); height:100%;
+  background:var(--s1); border-left:1px solid var(--b1);
+  display:flex; flex-direction:column; overflow:hidden;
+}
+
+/* Tabs */
+.stabs { display:flex; border-bottom:1px solid var(--b1); flex-shrink:0; }
+.stab {
+  flex:1; padding:.72rem .5rem;
+  background:transparent; border:none;
+  font-family:inherit; font-size:.72rem; font-weight:500;
+  color:var(--tx3); letter-spacing:.04em; cursor:pointer;
+  border-bottom:2px solid transparent; margin-bottom:-1px;
+  transition: color var(--t), border-color var(--t);
+}
+.stab:hover { color:var(--tx2); }
+.stab.active { color:var(--tx); border-bottom-color:var(--in2); }
+
+/* Panes — slide-in transition */
+.stab-viewport { flex:1; overflow:hidden; position:relative; }
+.stab-track {
+  display:flex; height:100%;
+  transition: transform .22s cubic-bezier(.4,0,.2,1);
+  will-change:transform;
+}
+.stab-pane { min-width:100%; width:100%; overflow-y:auto; padding:.9rem; }
+
+/* Controls */
+.s-lbl {
+  font-size:.6rem; font-weight:600; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--tx4); margin:0 0 .55rem;
+}
+.s-sep { height:1px; background:var(--b1); margin:.9rem 0; }
+
+/* Upload zone */
+.upzone {
+  border:1px dashed var(--b3); border-radius:var(--r);
+  padding:1rem .75rem; text-align:center; cursor:pointer;
+  position:relative; background:rgba(255,255,255,.015);
+  transition: all var(--t);
+}
+.upzone:hover { border-color:var(--in2); background:rgba(90,92,245,.06); }
+.upzone input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+.uz-main { font-size:.76rem; font-weight:500; color:var(--tx2); margin-bottom:.12rem; }
+.uz-sub  { font-size:.67rem; color:var(--tx3); }
+.face-row { display:flex; align-items:center; gap:.7rem; margin-top:.6rem; }
+#face-prev {
+  width:46px; height:46px; border-radius:50%; object-fit:cover;
+  border:1.5px solid var(--in2); display:none;
+  box-shadow:0 0 12px rgba(90,92,245,.3);
+}
+.face-info { font-size:.7rem; color:var(--tx2); line-height:1.5; }
+.face-info b { color:var(--tx); font-weight:600; display:block; }
+
+/* Slim sliders */
+.ctrl-group { display:flex; flex-direction:column; gap:.6rem; }
+.ctrl-item { position:relative; }
+.ctrl-head {
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:.38rem;
+}
+.ctrl-name { font-size:.7rem; font-weight:500; color:var(--tx2); }
+.ctrl-bub {
+  font-family:'JetBrains Mono',monospace; font-size:.67rem; color:var(--in2);
+  background:var(--s2); border:1px solid var(--b2); padding:.08rem .4rem;
+  border-radius:4px; min-width:2.6rem; text-align:center;
+}
+.slim-sl {
+  width:100%; appearance:none; height:2px;
+  background: linear-gradient(to right, var(--in) 0%, var(--in) var(--pct,0%), var(--s3) var(--pct,0%), var(--s3) 100%);
+  border-radius:2px; outline:none; cursor:pointer; transition:background var(--t);
+}
+.slim-sl:hover { background: linear-gradient(to right, var(--in2) 0%, var(--in2) var(--pct,0%), var(--s4) var(--pct,0%), var(--s4) 100%); }
+.slim-sl::-webkit-slider-thumb {
+  appearance:none; width:13px; height:13px; border-radius:50%;
+  background:var(--bg); border:1.5px solid var(--in2);
+  opacity:0; transform:scale(.6);
+  transition: opacity .16s, transform .16s;
+  box-shadow:0 0 0 3px rgba(90,92,245,.2);
+  cursor:grab;
+}
+.slim-sl:hover::-webkit-slider-thumb,
+.slim-sl:focus::-webkit-slider-thumb,
+.slim-sl:active::-webkit-slider-thumb { opacity:1; transform:scale(1); }
+
+/* Floating tooltip on drag */
+.ctrl-item::after {
+  content:attr(data-tip);
+  position:absolute; bottom:calc(100% + 6px); left:calc(var(--pct,50%) - 16px);
+  background:var(--s3); border:1px solid var(--b3); color:var(--in3);
+  font-family:'JetBrains Mono',monospace; font-size:.64rem;
+  padding:.16rem .42rem; border-radius:5px; white-space:nowrap;
+  pointer-events:none; opacity:0; transform:translateY(4px);
+  transition:opacity .18s, transform .18s;
+}
+.ctrl-item.dragging::after { opacity:1; transform:translateY(0); }
+
+/* Seg control */
+.seg {
+  display:flex; background:var(--s2); border:1px solid var(--b2);
+  border-radius:var(--r); overflow:hidden; padding:2px; gap:2px;
+}
+.seg-b {
+  flex:1; padding:.32rem .3rem; text-align:center;
+  font-size:.68rem; font-weight:500; color:var(--tx3);
+  background:transparent; border:none; cursor:pointer; border-radius:6px;
+  transition:all var(--t);
+}
+.seg-b:hover { color:var(--tx2); background:var(--s3); }
+.seg-b.on { background:var(--s4); color:var(--tx); }
+
+/* Toggle */
+.tog-row { display:flex; align-items:center; justify-content:space-between; padding:.25rem 0; }
+.tog-name { font-size:.7rem; font-weight:500; color:var(--tx2); }
+.tog-sw {
+  width:30px; height:16px; border-radius:99px;
+  background:var(--s3); border:1px solid var(--b2); cursor:pointer;
+  position:relative; transition:background .2s;
+  flex-shrink:0;
+}
+.tog-sw::after {
+  content:''; position:absolute; top:2px; left:2px;
+  width:10px; height:10px; border-radius:50%;
+  background:var(--tx3); transition:all .2s;
+  box-shadow:0 1px 2px rgba(0,0,0,.4);
+}
+.tog-sw.on { background:var(--in); border-color:var(--in); }
+.tog-sw.on::after { transform:translateX(14px); background:#fff; }
+
+/* Status chip */
+.s-chip {
+  display:flex; align-items:center; gap:.4rem; padding:.4rem .65rem;
+  border-radius:var(--r); background:var(--s2); border:1px solid var(--b1);
+  font-size:.68rem; color:var(--tx3); font-family:'JetBrains Mono',monospace;
+}
+.s-dot { width:5px; height:5px; border-radius:50%; background:var(--tx4); flex-shrink:0; }
+.s-dot.ok   { background:var(--live); box-shadow:0 0 4px var(--live); }
+.s-dot.warn { background:var(--warn); box-shadow:0 0 4px var(--warn); }
+.s-dot.err  { background:var(--err);  box-shadow:0 0 4px var(--err); }
+
+/* Action buttons */
+.abtn {
+  width:100%; padding:.64rem; border-radius:var(--r);
+  font-family:inherit; font-size:.78rem; font-weight:600;
+  cursor:pointer; transition:all var(--t);
+  display:flex; align-items:center; justify-content:center; gap:.38rem;
+  border:1px solid transparent;
+}
+.abtn.pr { background:var(--in); color:#fff; }
+.abtn.pr:hover { background:var(--in2); box-shadow:0 0 0 2px var(--inglow); }
+.abtn.pr.run { background: linear-gradient(135deg, #3b6fef, var(--live)); }
+.abtn.gr { background:rgba(34,197,94,.12); color:#86efac; border-color:rgba(34,197,94,.25); }
+.abtn.gr:hover { background:rgba(34,197,94,.2); }
+.abtn.gr.run { background:rgba(239,68,68,.1); border-color:rgba(239,68,68,.25); color:#fca5a5; }
+.abtn.sc { background:transparent; color:var(--tx2); border-color:var(--b2); }
+.abtn.sc:hover { background:var(--s2); color:var(--tx); border-color:var(--b3); }
+
+/* Performance tab */
+.spark-wrap {
+  position:relative; background:var(--s2); border:1px solid var(--b1);
+  border-radius:var(--r); height:50px; overflow:hidden; margin-bottom:.72rem;
+}
+.spark-wrap canvas { display:block; width:100%; height:100%; }
+.spark-lbl { position:absolute; top:5px; left:7px; font-family:'JetBrains Mono',monospace; font-size:.57rem; color:var(--tx4); }
+.spark-val { position:absolute; top:5px; right:7px; font-family:'JetBrains Mono',monospace; font-size:.63rem; color:var(--in2); font-weight:500; }
+
+/* Metrics — no emoji, weight 500 */
+.m-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:.38rem 0; border-bottom:1px solid var(--b1);
+}
+.m-row:last-child { border-bottom:none; }
+.m-key { font-size:.7rem; color:var(--tx2); font-weight:500; }
+.m-val { font-family:'JetBrains Mono',monospace; font-size:.7rem; color:var(--in2); font-weight:500; }
+.m-val.ok  { color:var(--live); }
+.m-val.warn{ color:var(--warn); }
+.m-val.err { color:var(--err); }
+
+/* Opt flags */
+.opt-flags { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:.65rem; }
+.opt-flag { font-size:.62rem; font-weight:500; padding:.16rem .48rem; border-radius:4px; border:1px solid; letter-spacing:.03em; }
+.opt-flag.on  { background:rgba(34,197,94,.08); border-color:rgba(34,197,94,.2); color:#86efac; }
+.opt-flag.off { background:rgba(239,68,68,.06); border-color:rgba(239,68,68,.15); color:#fca5a5; }
+
+/* Hist */
+.hist-grid { display:flex; flex-direction:column; gap:.45rem; }
+.hist-item {
+  display:flex; gap:.6rem; align-items:center;
+  padding:.48rem .58rem; border-radius:var(--r);
+  background:var(--s2); border:1px solid var(--b1); cursor:pointer;
+  transition:border-color var(--t);
+}
+.hist-item:hover { border-color:var(--b3); }
+.hist-thumb { width:44px; height:34px; border-radius:5px; object-fit:cover; background:var(--s3); flex-shrink:0; overflow:hidden; }
+.hist-thumb img { width:100%; height:100%; object-fit:cover; }
+.hist-info { flex:1; min-width:0; }
+.hist-name { font-size:.7rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hist-time { font-size:.62rem; color:var(--tx3); margin-top:.05rem; }
+.hist-acts { display:flex; gap:.3rem; }
+.hist-btn {
+  width:26px; height:26px; border-radius:5px; background:var(--s3);
+  border:1px solid var(--b2); color:var(--tx3); font-size:.72rem;
+  display:grid; place-items:center; transition:all var(--t); text-decoration:none;
+}
+.hist-btn:hover { background:var(--s4); color:var(--tx); }
+.hist-empty { text-align:center; padding:2rem 1rem; color:var(--tx3); }
+.hist-empty .he-i { font-size:1.8rem; margin-bottom:.5rem; display:block; }
+
+/* Legend */
+.legend { display:flex; flex-wrap:wrap; gap:.4rem; }
+.lg { display:flex; align-items:center; gap:.28rem; font-size:.67rem; color:var(--tx3); }
+.lg-d { width:6px; height:6px; border-radius:50%; }
+
+/* Notifs */
+#notif-stack { position:fixed; bottom:1rem; right:1rem; display:flex; flex-direction:column; gap:.4rem; z-index:999; }
+.notif {
+  background:var(--s2); border:1px solid var(--b3); border-radius:9px;
+  padding:.58rem .9rem; font-size:.76rem;
+  display:flex; align-items:center; gap:.42rem;
+  box-shadow:0 4px 22px rgba(0,0,0,.55);
+  animation:nIn .22s cubic-bezier(.4,0,.2,1), nOut .28s ease 2.9s forwards;
+  max-width:260px;
+}
+.ni { font-size:.88rem; flex-shrink:0; }
+@keyframes nIn  { from{transform:translateY(8px);opacity:0} to{transform:translateY(0);opacity:1} }
+@keyframes nOut { to{transform:translateY(4px);opacity:0} }
+</style>
+</head>
+<body>
+
+<!-- ═══ TOPNAV ═══ -->
+<nav class="nav">
+  <a class="nav-logo" href="#" onclick="App.nav('hub',null);return false">
+    <div class="nav-logo-icon">F</div>
+    <div class="nav-logo-name">FaceMorph</div>
+  </a>
+  <span class="nav-ver">PRO</span>
+  <div class="nav-pills">
+    <button class="nav-pill active" id="nt-hub"    onclick="App.nav('hub',this)">Hub</button>
+    <button class="nav-pill"        id="nt-swap"   onclick="App.nav('swap',this)">Face Swap</button>
+    <button class="nav-pill"        id="nt-motion" onclick="App.nav('motion',this)">Motion</button>
+  </div>
+  <div class="nav-badge idle" id="nav-badge">
+    <div class="badge-dot"></div>
+    <span id="nav-badge-txt">Inativo</span>
+  </div>
+  <div class="nav-spacer"></div>
+  <div class="nav-actions">
+    <button class="nav-btn" onclick="App.captureActive()">Capturar</button>
+    <button class="nav-btn pr" onclick="App.nav('swap',document.getElementById('nt-swap'))">+ Criar</button>
+  </div>
+</nav>
+
+<!-- ═══ SHELL ═══ -->
+<div class="shell">
+
+  <!-- MAIN CONTENT -->
+  <div class="main">
+  <div class="content">
+
+    <!-- ─── HUB PAGE ─── -->
+    <div class="page active" id="page-hub">
+    <div class="hub-wrap">
+
+      <div class="hub-hero">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1rem">
+          <div>
+            <h1>Seu <em>AI Studio</em><br>em tempo real</h1>
+            <p>Delaunay Warp · EMA Smoother · Z-Sort · OffscreenCanvas · AutoTone</p>
+            <div class="hub-chips">
+              <span class="hub-chip hc-i">Delaunay Warp</span>
+              <span class="hub-chip hc-g">OC Batching</span>
+              <span class="hub-chip hc-b">100% Local</span>
+            </div>
+          </div>
+          <div style="width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,rgba(90,92,245,.3),rgba(90,92,245,.06));border:1px solid rgba(90,92,245,.18);flex-shrink:0"></div>
+        </div>
+      </div>
+
+      <div class="hub-sh"><span class="hub-sh-t">Ferramentas</span></div>
+      <div class="tools-grid">
+
+        <div class="tc" onclick="App.nav('swap',document.getElementById('nt-swap'))">
+          <div class="tc-thumb g1">
+            <div class="tc-thumb-overlay"><span class="tc-thumb-label">Face Swap</span></div>
+          </div>
+          <div class="tc-body">
+            <div class="tc-row"><div class="tc-name">Face Swap</div><span class="badge-pill bp-hot">HOT</span></div>
+            <div class="tc-desc">Warp triangular com Z-sort e AutoTone blending.</div>
+            <div class="tc-foot"><span class="tc-tag">rosto</span><button class="tc-go">Abrir →</button></div>
+          </div>
+        </div>
+
+        <div class="tc" onclick="App.nav('motion',document.getElementById('nt-motion'))">
+          <div class="tc-thumb g2">
+            <div class="tc-thumb-overlay"><span class="tc-thumb-label">Motion Copy</span></div>
+          </div>
+          <div class="tc-body">
+            <div class="tc-row"><div class="tc-name">Motion Copy</div><span class="badge-pill bp-new">NEW</span></div>
+            <div class="tc-desc">33 joints, trilha persistente, temas Neon/Fire/Ghost.</div>
+            <div class="tc-foot"><span class="tc-tag">corpo</span><button class="tc-go">Abrir →</button></div>
+          </div>
+        </div>
+
+        <div class="tc" onclick="UI.notif('','FaceMesh 3D — em breve')">
+          <div class="tc-thumb g3">
+            <div class="tc-thumb-overlay"><span class="tc-thumb-label">FaceMesh 3D</span></div>
+          </div>
+          <div class="tc-body">
+            <div class="tc-row"><div class="tc-name">FaceMesh 3D</div><span class="badge-pill bp-beta">BETA</span></div>
+            <div class="tc-desc">Malha 3D dos 468 pontos em perspectiva.</div>
+            <div class="tc-foot"><span class="tc-tag">rosto</span><button class="tc-go soon">Em breve</button></div>
+          </div>
+        </div>
+
+        <div class="tc" onclick="UI.notif('','Style Transfer — em breve')">
+          <div class="tc-thumb g4">
+            <div class="tc-thumb-overlay"><span class="tc-thumb-label">Style Transfer</span></div>
+          </div>
+          <div class="tc-body">
+            <div class="tc-row"><div class="tc-name">Style Transfer</div></div>
+            <div class="tc-desc">Estilos artísticos via neural network ao vivo.</div>
+            <div class="tc-foot"><span class="tc-tag">efeito</span><button class="tc-go soon">Em breve</button></div>
+          </div>
+        </div>
+
+        <div class="tc" onclick="UI.notif('','Emotion Tracker — em breve')">
+          <div class="tc-thumb g5">
+            <div class="tc-thumb-overlay"><span class="tc-thumb-label">Emotion Track</span></div>
+          </div>
+          <div class="tc-body">
+            <div class="tc-row"><div class="tc-name">Emotion Track</div></div>
+            <div class="tc-desc">7 emoções via microexpressões faciais.</div>
+            <div class="tc-foot"><span class="tc-tag">rosto</span><button class="tc-go soon">Em breve</button></div>
+          </div>
+        </div>
+
+        <div class="tc" onclick="UI.notif('','AR Filters — em breve')">
+          <div class="tc-thumb g6">
+            <div class="tc-thumb-overlay"><span class="tc-thumb-label">AR Filters</span></div>
+          </div>
+          <div class="tc-body">
+            <div class="tc-row"><div class="tc-name">AR Filters</div></div>
+            <div class="tc-desc">Óculos e máscaras via WebGL realtime.</div>
+            <div class="tc-foot"><span class="tc-tag">efeito</span><button class="tc-go soon">Em breve</button></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="hub-sh" style="margin-top:1.4rem">
+        <span class="hub-sh-t">Recentes</span>
+        <span class="hub-sh-a" onclick="App.openHistory()">Ver histórico →</span>
+      </div>
+      <div class="recent-row">
+        <div class="rc" onclick="App.openHistory()">
+          <div class="rc-img g1"><span class="rc-img-label">Face Swap</span></div>
+          <div class="rc-lbl">face_swap</div>
+        </div>
+        <div class="rc" onclick="App.openHistory()">
+          <div class="rc-img g2"><span class="rc-img-label">Motion</span></div>
+          <div class="rc-lbl">motion_neon</div>
+        </div>
+        <div class="rc" onclick="App.nav('swap',document.getElementById('nt-swap'))">
+          <div class="rc-img" style="background:var(--s2)"></div>
+          <div class="rc-lbl" style="color:var(--tx4)">+ novo</div>
+        </div>
+      </div>
+
+    </div>
+    </div><!-- /hub -->
+
+    <!-- ─── FACE SWAP PAGE ─── -->
+    <div class="page" id="page-swap">
+
+      <!-- Canvas -->
+      <div class="cv-shell" id="sw-shell">
+        <canvas id="sw-canvas"></canvas>
+        <div class="cv-flash" id="sw-flash"></div>
+        <div class="cv-hud">
+          <div class="cv-hud-top">
+            <div class="cv-badge idle" id="sw-cv-badge">
+              <div class="badge-dot"></div><span id="sw-cv-txt">Inativo</span>
+            </div>
+            <div style="display:flex;gap:.38rem;align-items:center">
+              <div class="cv-metric" id="tone-chip" style="display:none;transition:all .6s">
+                <span id="tone-val">—</span>
+              </div>
+              <div class="cv-metric" id="sw-cv-fps">— fps</div>
+            </div>
+          </div>
+          <div class="cv-hud-bot">
+            <div></div>
+            <div class="cv-metric" id="sw-cv-sz">—</div>
+          </div>
+        </div>
+
+        <!-- FLOATING DOCK — SVG icons -->
+        <div class="cv-dock" id="sw-dock">
+          <!-- Screenshot: camera outline -->
+          <button class="dk-btn" data-tip="Screenshot" onclick="App.capture('sw')">
+            <svg viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="12" rx="1.5"/><path d="M7 5l1.5-2h3L13 5"/><circle cx="10" cy="11" r="3"/></svg>
+          </button>
+          <!-- Record: outer ring + filled dot -->
+          <button class="dk-btn" id="sw-rec-btn" data-tip="Gravar" onclick="App.toggleRecord('sw')">
+            <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3.5" class="filled"/></svg>
+          </button>
+          <div class="dk-sep"></div>
+          <!-- Flip: crossing arrows -->
+          <button class="dk-btn" id="sw-flip-btn" data-tip="Espelhar" onclick="App.toggleFlip('sw')">
+            <svg viewBox="0 0 20 20">
+              <path d="M3 10a7 7 0 017-7 7 7 0 015 2.1"/>
+              <path d="M17 10a7 7 0 01-7 7 7 7 0 01-5-2.1"/>
+              <polyline points="14.5,4.5 16,3 17.5,4.5"/>
+              <polyline points="5.5,15.5 4,17 2.5,15.5"/>
+            </svg>
+          </button>
+          <!-- Landmarks: crosshair -->
+          <button class="dk-btn dim" id="sw-lm-btn" data-tip="Landmarks" onclick="App.toggleLandmarks()">
+            <svg viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="5.5"/>
+              <circle cx="10" cy="10" r="1.5" class="filled"/>
+              <line x1="10" y1="2" x2="10" y2="5.5"/>
+              <line x1="10" y1="14.5" x2="10" y2="18"/>
+              <line x1="2" y1="10" x2="4.5" y2="10"/>
+              <line x1="15.5" y1="10" x2="18" y2="10"/>
+            </svg>
+          </button>
+          <div class="dk-sep"></div>
+          <!-- Play/Stop: triangle ↔ square -->
+          <button class="dk-btn" id="sw-dock-run" data-tip="Iniciar" onclick="App.toggleSwap()">
+            <svg id="sw-run-svg" viewBox="0 0 20 20">
+              <polygon points="5,3.5 16.5,10 5,16.5" class="filled"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="cv-loader" id="sw-loader">
+          <div class="ld-ring"></div>
+          <div class="ld-txt">Carregando FaceMesh…</div>
+        </div>
+      </div>
+
+      <!-- Warp bar -->
+      <div class="warp-bar" id="warp-bar">
+        <div class="wb-dot" id="wb-dot"></div>
+        <span id="wb-txt">—</span>
+        <div class="luma-dot" id="luma-dot"></div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-strip">
+        <div class="stat-chip"><span class="sc-lbl">FPS</span><span class="sc-val" id="sw-fps">—</span></div>
+        <div class="stat-chip"><span class="sc-lbl">Rostos</span><span class="sc-val" id="sw-faces">0</span></div>
+        <div class="stat-chip"><span class="sc-lbl">Modo</span><span class="sc-val" id="sw-mode-disp">—</span></div>
+        <div class="stat-chip"><span class="sc-lbl">Tone</span><span class="sc-val" id="sw-tone-stat" style="font-size:.75rem">—</span></div>
+      </div>
+    </div><!-- /swap -->
+
+    <!-- ─── MOTION PAGE ─── -->
+    <div class="page" id="page-motion">
+      <div class="cv-shell" id="po-shell">
+        <canvas id="po-canvas"></canvas>
+        <div class="cv-flash" id="po-flash"></div>
+        <div class="cv-hud">
+          <div class="cv-hud-top">
+            <div class="cv-badge idle" id="po-cv-badge">
+              <div class="badge-dot"></div><span id="po-cv-txt">Inativo</span>
+            </div>
+            <div class="cv-metric" id="po-cv-fps">— fps</div>
+          </div>
+          <div class="cv-hud-bot">
+            <div class="legend">
+              <div class="lg"><div class="lg-d" style="background:#00f5ff"></div>Rosto</div>
+              <div class="lg"><div class="lg-d" style="background:#f472b6"></div>Torso</div>
+              <div class="lg"><div class="lg-d" style="background:#fbbf24"></div>Braços</div>
+              <div class="lg"><div class="lg-d" style="background:#34d399"></div>Pernas</div>
+            </div>
+          </div>
+        </div>
+        <!-- Motion dock -->
+        <div class="cv-dock" id="po-dock">
+          <button class="dk-btn" data-tip="Screenshot" onclick="App.capture('po')">
+            <svg viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="12" rx="1.5"/><path d="M7 5l1.5-2h3L13 5"/><circle cx="10" cy="11" r="3"/></svg>
+          </button>
+          <button class="dk-btn" id="po-rec-btn" data-tip="Gravar" onclick="App.toggleRecord('po')">
+            <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3.5" class="filled"/></svg>
+          </button>
+          <div class="dk-sep"></div>
+          <button class="dk-btn" id="po-flip-btn" data-tip="Espelhar" onclick="App.toggleFlip('po')">
+            <svg viewBox="0 0 20 20">
+              <path d="M3 10a7 7 0 017-7 7 7 0 015 2.1"/>
+              <path d="M17 10a7 7 0 01-7 7 7 7 0 01-5-2.1"/>
+              <polyline points="14.5,4.5 16,3 17.5,4.5"/>
+              <polyline points="5.5,15.5 4,17 2.5,15.5"/>
+            </svg>
+          </button>
+          <div class="dk-sep"></div>
+          <button class="dk-btn" id="po-dock-run" data-tip="Iniciar" onclick="App.togglePose()">
+            <svg id="po-run-svg" viewBox="0 0 20 20">
+              <polygon points="5,3.5 16.5,10 5,16.5" class="filled"/>
+            </svg>
+          </button>
+        </div>
+        <div class="cv-loader" id="po-loader">
+          <div class="ld-ring g"></div>
+          <div class="ld-txt">Carregando Pose Engine…</div>
+        </div>
+      </div>
+      <div class="stats-strip">
+        <div class="stat-chip"><span class="sc-lbl">FPS</span><span class="sc-val g" id="po-fps">—</span></div>
+        <div class="stat-chip"><span class="sc-lbl">Joints</span><span class="sc-val g" id="po-jts">0</span></div>
+        <div class="stat-chip"><span class="sc-lbl">Precisão</span><span class="sc-val g" id="po-acc">—%</span></div>
+      </div>
+    </div><!-- /motion -->
+
+  </div><!-- /content -->
+  </div><!-- /main -->
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <aside class="sidebar" id="main-sidebar" style="display:none">
+
+    <!-- SWAP sidebar -->
+    <div id="sb-swap" style="display:none;height:100%;flex-direction:column">
+      <div class="stabs" id="swap-stabs">
+        <button class="stab active" onclick="switchTab('swap',0,this)">Ajustes</button>
+        <button class="stab" onclick="switchTab('swap',1,this)">Performance</button>
+        <button class="stab" onclick="switchTab('swap',2,this)">Histórico</button>
+      </div>
+      <div class="stab-viewport">
+        <div class="stab-track" id="swap-track">
+
+          <!-- Pane 0: Ajustes -->
+          <div class="stab-pane">
+            <div class="s-lbl">Rosto Alvo</div>
+            <div class="upzone" id="sw-upzone">
+              <input type="file" id="sw-file" accept="image/*">
+              <div class="uz-main">Upload de rosto</div>
+              <div class="uz-sub">JPG · PNG · WEBP</div>
+            </div>
+            <div class="face-row" id="face-row-wrap" style="display:none">
+              <img id="face-prev" src="" alt="">
+              <div class="face-info"><b>Rosto carregado</b>Warp triangular pronto</div>
+            </div>
+            <div class="s-sep"></div>
+            <div class="s-lbl">Renderização</div>
+            <div class="ctrl-group">
+              <div class="ctrl-item">
+                <div class="ctrl-head"><span class="ctrl-name">Modo</span></div>
+                <div class="seg">
+                  <button class="seg-b on" onclick="SwapR.setMode('warp',this)">Warp △</button>
+                  <button class="seg-b" onclick="SwapR.setMode('overlay',this)">Overlay</button>
+                  <button class="seg-b" onclick="SwapR.setMode('screen',this)">Screen</button>
+                </div>
+              </div>
+              <div class="ctrl-item" id="ci-op" data-tip="90%">
+                <div class="ctrl-head"><span class="ctrl-name">Opacidade</span><span class="ctrl-bub" id="bv-op">90%</span></div>
+                <input class="slim-sl" type="range" min="0" max="100" value="90" style="--pct:90%"
+                  oninput="SwapR.set('opacity',+this.value/100);slUpd(this,'op',this.value+'%','ci-op')">
+              </div>
+              <div class="ctrl-item" id="ci-sc" data-tip="108%">
+                <div class="ctrl-head"><span class="ctrl-name">Escala</span><span class="ctrl-bub" id="bv-sc">108%</span></div>
+                <input class="slim-sl" type="range" min="60" max="150" value="108" style="--pct:53%"
+                  oninput="SwapR.set('scale',+this.value/100);slUpd(this,'sc',this.value+'%','ci-sc')">
+              </div>
+              <div class="ctrl-item" id="ci-fe" data-tip="45">
+                <div class="ctrl-head"><span class="ctrl-name">Feather</span><span class="ctrl-bub" id="bv-fe">45</span></div>
+                <input class="slim-sl" type="range" min="0" max="100" value="45" style="--pct:45%"
+                  oninput="SwapR.set('feather',+this.value);SwapR.recomputeFeather();slUpd(this,'fe',this.value,'ci-fe')">
+              </div>
+              <div class="ctrl-item" id="ci-oy" data-tip="0">
+                <div class="ctrl-head"><span class="ctrl-name">Offset Y</span><span class="ctrl-bub" id="bv-oy">0</span></div>
+                <input class="slim-sl" type="range" min="-50" max="50" value="0" style="--pct:50%"
+                  oninput="SwapR.set('offsetY',+this.value);slUpd(this,'oy',this.value,'ci-oy')">
+              </div>
+              <div class="tog-row"><span class="tog-name">Landmarks</span>
+                <div class="tog-sw" id="tog-lm" onclick="this.classList.toggle('on');SwapR.set('showLM',this.classList.contains('on'))"></div>
+              </div>
+              <div class="tog-row"><span class="tog-name">Auto-Tone Blend</span>
+                <div class="tog-sw on" id="tog-tone" onclick="this.classList.toggle('on');SwapR.set('autoTone',this.classList.contains('on'))"></div>
+              </div>
+              <div class="tog-row"><span class="tog-name">Z-Depth Sort</span>
+                <div class="tog-sw on" id="tog-zdepth" onclick="this.classList.toggle('on');SwapR.set('zDepthSort',this.classList.contains('on'))"></div>
+              </div>
+            </div>
+            <div class="s-sep"></div>
+            <div class="s-chip" style="margin-bottom:.6rem"><div class="s-dot" id="sw-sdot"></div><span id="sw-smsg">Câmera não iniciada</span></div>
+            <button class="abtn pr" id="sw-btn" onclick="App.toggleSwap()">▶ Iniciar Face Swap</button>
+            <div style="margin-top:.42rem"><button class="abtn sc" onclick="App.capture('sw')">Screenshot</button></div>
+          </div>
+
+          <!-- Pane 1: Performance -->
+          <div class="stab-pane">
+            <div class="s-lbl">Frame Time</div>
+            <div class="spark-wrap">
+              <canvas id="spark-canvas" height="50"></canvas>
+              <div class="spark-lbl">FRAME TIME (ms)</div>
+              <div class="spark-val" id="spark-val">—</div>
+            </div>
+            <div class="s-lbl" style="margin-top:.7rem">Métricas</div>
+            <div class="m-row"><span class="m-key">Frame time</span><span class="m-val" id="pm-ft">— ms</span></div>
+            <div class="m-row"><span class="m-key">Render FPS</span><span class="m-val" id="pm-fps">—</span></div>
+            <div class="m-row"><span class="m-key">Triângulos</span><span class="m-val" id="pm-tris">—</span></div>
+            <div class="m-row"><span class="m-key">Canvas</span><span class="m-val" id="pm-sz">—</span></div>
+            <div class="m-row"><span class="m-key">Heap JS</span><span class="m-val" id="pm-heap">—</span></div>
+            <div class="m-row"><span class="m-key">Bitmaps GPU</span><span class="m-val" id="pm-bmp">—</span></div>
+            <div class="s-sep"></div>
+            <div class="s-lbl">EMA α</div>
+            <input class="slim-sl" type="range" min="5" max="95" value="35" style="--pct:32%;margin-bottom:.65rem"
+              oninput="SwapR.smoother.setAlpha(+this.value/100);document.getElementById('pm-alpha').textContent=(+this.value/100).toFixed(2);this.style.setProperty('--pct',this.value+'%')">
+            <div style="display:flex;justify-content:space-between;font-size:.68rem;color:var(--tx3);margin-top:-.4rem;margin-bottom:.65rem">
+              <span>Suave</span><span id="pm-alpha" style="color:var(--in2);font-family:'JetBrains Mono',monospace">0.35</span><span>Rápido</span>
+            </div>
+            <div class="s-lbl">Otimizações</div>
+            <div class="opt-flags">
+              <div class="opt-flag on"  id="flag-raf">RAF loop</div>
+              <div class="opt-flag off" id="flag-batch">OC Batch</div>
+              <div class="opt-flag off" id="flag-ema">EMA</div>
+              <div class="opt-flag off" id="flag-bitmap">Bitmap</div>
+              <div class="opt-flag on"  id="flag-close">.close()</div>
+              <div class="opt-flag off" id="flag-zsort">Z-sort</div>
+              <div class="opt-flag off" id="flag-autotone">AutoTone</div>
+            </div>
+          </div>
+
+          <!-- Pane 2: Histórico -->
+          <div class="stab-pane">
+            <div class="s-lbl">Capturas</div>
+            <div class="hist-grid" id="hist-grid"></div>
+            <div class="hist-empty" id="hist-empty">
+              <span class="he-i">□</span>
+              <p>Nenhuma captura.<br>Use Screenshot para salvar.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MOTION sidebar -->
+    <div id="sb-motion" style="display:none;height:100%;flex-direction:column">
+      <div class="stabs" id="motion-stabs">
+        <button class="stab active" onclick="switchTab('motion',0,this)">Ajustes</button>
+        <button class="stab" onclick="switchTab('motion',1,this)">Histórico</button>
+      </div>
+      <div class="stab-viewport">
+        <div class="stab-track" id="motion-track">
+
+          <!-- Pane 0: Ajustes -->
+          <div class="stab-pane">
+            <div class="s-lbl">Renderização</div>
+            <div class="ctrl-group">
+              <div class="ctrl-item">
+                <div class="ctrl-head"><span class="ctrl-name">Modo</span></div>
+                <div class="seg">
+                  <button class="seg-b on" onclick="PoseR.setMode('both',this)">Ambos</button>
+                  <button class="seg-b" onclick="PoseR.setMode('skel',this)">Skel.</button>
+                  <button class="seg-b" onclick="PoseR.setMode('cam',this)">Câmera</button>
+                </div>
+              </div>
+              <div class="ctrl-item">
+                <div class="ctrl-head"><span class="ctrl-name">Tema</span></div>
+                <div class="seg">
+                  <button class="seg-b on" onclick="PoseR.setTheme('neon',this)">Neon</button>
+                  <button class="seg-b" onclick="PoseR.setTheme('fire',this)">Fire</button>
+                  <button class="seg-b" onclick="PoseR.setTheme('ghost',this)">Ghost</button>
+                </div>
+              </div>
+              <div class="ctrl-item" id="ci-pt" data-tip="6">
+                <div class="ctrl-head"><span class="ctrl-name">Pontos</span><span class="ctrl-bub" id="bv-pt">6</span></div>
+                <input class="slim-sl" type="range" min="2" max="18" value="6" style="--pct:25%"
+                  oninput="PoseR.set('pointR',+this.value);slUpd(this,'pt',this.value,'ci-pt')">
+              </div>
+              <div class="ctrl-item" id="ci-lw" data-tip="3">
+                <div class="ctrl-head"><span class="ctrl-name">Linhas</span><span class="ctrl-bub" id="bv-lw">3</span></div>
+                <input class="slim-sl" type="range" min="1" max="10" value="3" style="--pct:22%"
+                  oninput="PoseR.set('lineW',+this.value);slUpd(this,'lw',this.value,'ci-lw')">
+              </div>
+              <div class="ctrl-item" id="ci-gl" data-tip="14">
+                <div class="ctrl-head"><span class="ctrl-name">Glow</span><span class="ctrl-bub" id="bv-gl">14</span></div>
+                <input class="slim-sl" type="range" min="0" max="30" value="14" style="--pct:47%"
+                  oninput="PoseR.set('glow',+this.value);slUpd(this,'gl',this.value,'ci-gl')">
+              </div>
+              <div class="tog-row"><span class="tog-name">Trilha</span>
+                <div class="tog-sw on" id="tog-trail" onclick="this.classList.toggle('on');PoseR.set('trail',this.classList.contains('on'))"></div>
+              </div>
+            </div>
+            <div class="s-sep"></div>
+            <div class="s-chip" style="margin-bottom:.6rem"><div class="s-dot" id="po-sdot"></div><span id="po-smsg">Motion inativo</span></div>
+            <button class="abtn gr" id="po-btn" onclick="App.togglePose()">▶ Iniciar Motion Capture</button>
+            <div style="margin-top:.42rem"><button class="abtn sc" onclick="App.capture('po')">Screenshot</button></div>
+          </div>
+
+          <!-- Pane 1: Histórico -->
+          <div class="stab-pane">
+            <div class="s-lbl">Capturas</div>
+            <div class="hist-grid" id="hist-grid-po"></div>
+            <div class="hist-empty" id="hist-empty-po">
+              <span class="he-i">□</span>
+              <p>Nenhuma captura.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+</div><!-- /shell -->
+
+<div id="notif-stack"></div>
+
+<script>
+'use strict';
+
+/* ─── HELPERS ─────────────────────────────────────────────── */
+function slUpd(el, key, label, ciId) {
+  const bub = document.getElementById('bv-' + key);
+  if (bub) bub.textContent = label;
+  const pct = ((+el.value - +el.min) / (+el.max - +el.min) * 100).toFixed(1) + '%';
+  el.style.setProperty('--pct', pct);
+  const ci = document.getElementById(ciId);
+  if (ci) {
+    ci.dataset.tip = label;
+    ci.classList.add('dragging');
+    clearTimeout(ci._t);
+    ci._t = setTimeout(() => ci.classList.remove('dragging'), 1200);
+  }
+}
+
+// Index-based tab switcher with CSS translate
+function switchTab(page, idx, btn) {
+  const track = document.getElementById(page + '-track');
+  if (track) track.style.transform = `translateX(-${idx * 100}%)`;
+  document.querySelectorAll(`#${page}-stabs .stab`).forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function setBadge(state, txt) {
+  const nb = document.getElementById('nav-badge');
+  nb.className = 'nav-badge ' + state;
+  document.getElementById('nav-badge-txt').textContent = txt;
+}
+function setCvBadge(px, state, txt) {
+  const cb = document.getElementById(px + '-cv-badge');
+  if (!cb) return;
+  cb.className = 'cv-badge ' + state;
+  document.getElementById(px + '-cv-txt').textContent = txt;
+}
+
+/* UI */
+const UI = {
+  notif(ico, msg) {
+    const el = document.createElement('div');
+    el.className = 'notif';
+    el.innerHTML = `<span class="ni">${ico||'·'}</span><span>${msg}</span>`;
+    document.getElementById('notif-stack').appendChild(el);
+    setTimeout(() => el.remove(), 3300);
+  },
+  vl(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; },
+  dot(id, cls) { const e = document.getElementById(id); if (e) e.className = 's-dot' + (cls ? ' ' + cls : ''); },
+  status(d, m, c, t) { this.dot(d, c); this.vl(m, t); },
+  segToggle(btn) {
+    btn.closest('.seg').querySelectorAll('.seg-b').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+  },
+  flag(id, state) {
+    const el = document.getElementById(id); if (!el) return;
+    el.className = 'opt-flag ' + state;
+    const L = {
+      'flag-batch':    { on:'OC Batch',  off:'OC Batch'  },
+      'flag-ema':      { on:'EMA',        off:'EMA'        },
+      'flag-bitmap':   { on:'Bitmap',     off:'Bitmap'     },
+      'flag-close':    { on:'.close()',   off:'.close()'   },
+      'flag-raf':      { on:'RAF loop',   off:'RAF loop'   },
+      'flag-zsort':    { on:'Z-sort',     off:'Z-sort'     },
+      'flag-autotone': { on:'AutoTone',   off:'AutoTone'   },
+    };
+    if (L[id]) el.textContent = L[id][state] ?? el.textContent;
+  }
+};
+
+/* Gallery */
+const Gal = { items: [] };
+function addToGal(name, dataUrl, prefix) {
+  Gal.items.unshift({ name, dataUrl, time: new Date().toLocaleTimeString(), prefix });
+  renderHist();
+}
+function renderHist() {
+  ['sw','po'].forEach(px => {
+    const grid  = document.getElementById(px === 'sw' ? 'hist-grid' : 'hist-grid-po');
+    const empty = document.getElementById(px === 'sw' ? 'hist-empty' : 'hist-empty-po');
+    if (!grid) return;
+    const items = Gal.items.filter(i => i.prefix === px);
+    if (!items.length) { grid.innerHTML = ''; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    grid.innerHTML = items.map(item => `
+      <div class="hist-item">
+        <div class="hist-thumb"><img src="${item.dataUrl}" onerror="this.parentElement.textContent='[ ]'"></div>
+        <div class="hist-info">
+          <div class="hist-name">${item.name}</div>
+          <div class="hist-time">${item.time}</div>
+        </div>
+        <div class="hist-acts">
+          <a class="hist-btn" href="${item.dataUrl}" download="${item.name}.png">↓</a>
+          <button class="hist-btn" onclick="Gal.items.splice(${Gal.items.indexOf(item)},1);renderHist()">✕</button>
+        </div>
+      </div>`).join('');
+  });
+}
+renderHist();
+
+/* ─────────────────────────────────────────────────────────────
+   DOCK AUTO-HIDE
+   Shows on mousemove, hides after 3s idle (per shell)
+───────────────────────────────────────────────────────────── */
+const DockHide = {
+  _t: {},
+  init(px) {
+    const shell = document.getElementById(px + '-shell');
+    const dock  = document.getElementById(px + '-dock');
+    if (!shell || !dock) return;
+    shell.addEventListener('pointermove', () => {
+      dock.classList.remove('hidden');
+      clearTimeout(this._t[px]);
+      this._t[px] = setTimeout(() => {
+        if (!Recorder.recording || Recorder._prefix !== px)
+          dock.classList.add('hidden');
+      }, 3000);
+    });
+    dock.addEventListener('pointerenter', () => clearTimeout(this._t[px]));
+    dock.addEventListener('pointerleave', () => {
+      this._t[px] = setTimeout(() => {
+        if (!Recorder.recording || Recorder._prefix !== px)
+          dock.classList.add('hidden');
+      }, 3000);
+    });
+    // Initial hide after 3s
+    this._t[px] = setTimeout(() => dock.classList.add('hidden'), 3000);
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────
+   SCREENSHOT FLASH — white overlay micro-interaction
+───────────────────────────────────────────────────────────── */
+function triggerFlash(px) {
+  const flash = document.getElementById(px + '-flash');
+  if (!flash) return;
+  flash.classList.remove('fire');
+  void flash.offsetWidth; // force reflow to restart animation
+  flash.classList.add('fire');
+}
+
+/* ─────────────────────────────────────────────────────────────
+   DELAUNAY (Bowyer-Watson)
+───────────────────────────────────────────────────────────── */
+const Delaunay = {
+  triangulate(pts) {
+    const n = pts.length; if (n < 3) return [];
+    let mnX=pts[0][0],mnY=pts[0][1],mxX=mnX,mxY=mnY;
+    for(const[x,y]of pts){if(x<mnX)mnX=x;if(y<mnY)mnY=y;if(x>mxX)mxX=x;if(y>mxY)mxY=y;}
+    const dM=Math.max(mxX-mnX,mxY-mnY)*3,cX=(mnX+mxX)/2,cY=(mnY+mxY)/2;
+    const all=[...pts,[cX-dM,cY-dM],[cX,cY+dM],[cX+dM,cY-dM]];
+    let tris=[[n,n+1,n+2]];
+    for(let p=0;p<n;p++){
+      const[px,py]=all[p],bad=[];
+      for(const t of tris){
+        const[ax,ay]=all[t[0]],[bx,by]=all[t[1]],[cx,cy]=all[t[2]];
+        const D=2*(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
+        if(Math.abs(D)<1e-10)continue;
+        const ux=((ax*ax+ay*ay)*(by-cy)+(bx*bx+by*by)*(cy-ay)+(cx*cx+cy*cy)*(ay-by))/D;
+        const uy=((ax*ax+ay*ay)*(cx-bx)+(bx*bx+by*by)*(ax-cx)+(cx*cx+cy*cy)*(bx-ax))/D;
+        if((px-ux)**2+(py-uy)**2<=(ax-ux)**2+(ay-uy)**2+1e-6)bad.push(t);
+      }
+      const poly=[];
+      for(const t of bad)for(const[e0,e1]of[[t[0],t[1]],[t[1],t[2]],[t[2],t[0]]]){
+        const s=bad.some(o=>o!==t&&((o[0]===e0&&o[1]===e1)||(o[1]===e0&&o[2]===e1)||(o[2]===e0&&o[0]===e1)||(o[0]===e1&&o[1]===e0)||(o[1]===e1&&o[2]===e0)||(o[2]===e1&&o[0]===e0)));
+        if(!s)poly.push([e0,e1]);
+      }
+      tris=tris.filter(t=>!bad.includes(t));
+      for(const[e0,e1]of poly)tris.push([e0,e1,p]);
+    }
+    return tris.filter(t=>t[0]<n&&t[1]<n&&t[2]<n);
+  }
+};
+
+function computeAffine(s,d){
+  const[s0,s1,s2]=s,[d0,d1,d2]=d;
+  const dx1=s1[0]-s0[0],dy1=s1[1]-s0[1],dx2=s2[0]-s0[0],dy2=s2[1]-s0[1];
+  const det=dx1*dy2-dx2*dy1; if(Math.abs(det)<1e-8)return null;
+  const iv=1/det;
+  const a=(d1[0]-d0[0])*dy2*iv-(d2[0]-d0[0])*dy1*iv;
+  const b=(d1[1]-d0[1])*dy2*iv-(d2[1]-d0[1])*dy1*iv;
+  const c=(d2[0]-d0[0])*dx1*iv-(d1[0]-d0[0])*dx2*iv;
+  const dd=(d2[1]-d0[1])*dx1*iv-(d1[1]-d0[1])*dx2*iv;
+  return[a,b,c,dd,d0[0]-a*s0[0]-c*s0[1],d0[1]-b*s0[0]-dd*s0[1]];
+}
+function drawTri(ctx,img,s,d){
+  const m=computeAffine(s,d); if(!m)return;
+  ctx.save();ctx.beginPath();
+  ctx.moveTo(d[0][0],d[0][1]);ctx.lineTo(d[1][0],d[1][1]);ctx.lineTo(d[2][0],d[2][1]);
+  ctx.closePath();ctx.clip();
+  ctx.transform(m[0],m[1],m[2],m[3],m[4],m[5]);
+  ctx.drawImage(img,0,0);ctx.restore();
+}
+
+/* ─────────────────────────────────────────────────────────────
+   EMA LANDMARK SMOOTHER
+   smooth_t = α·new + (1-α)·prev  — eliminates jitter on 468 pts
+───────────────────────────────────────────────────────────── */
+class LandmarkSmoother {
+  constructor(alpha=0.35){ this._a=alpha; this._p=null; this._n=0; }
+  setAlpha(a){ this._a=Math.max(.05,Math.min(.95,a)); }
+  smooth(lms){
+    const n=lms.length,α=this._a,β=1-α;
+    if(!this._p||this._n!==n){
+      this._n=n; this._p=new Float32Array(n*3);
+      for(let i=0;i<n;i++){this._p[i*3]=lms[i].x;this._p[i*3+1]=lms[i].y;this._p[i*3+2]=lms[i].z??0;}
+      return lms.map(l=>({x:l.x,y:l.y,z:l.z??0,visibility:l.visibility}));
+    }
+    const out=new Array(n);
+    for(let i=0;i<n;i++){
+      const b=i*3;
+      const sx=α*lms[i].x+β*this._p[b],sy=α*lms[i].y+β*this._p[b+1],sz=α*(lms[i].z??0)+β*this._p[b+2];
+      this._p[b]=sx;this._p[b+1]=sy;this._p[b+2]=sz;
+      out[i]={x:sx,y:sy,z:sz,visibility:lms[i].visibility};
+    }
+    return out;
+  }
+  reset(){ this._p=null; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   AUTO-TONE ENGINE
+   Samples forehead luma every 15 frames → brightness/contrast CSS filter
+   EMA α=0.08 for slow, natural transitions
+───────────────────────────────────────────────────────────── */
+class AutoToneEngine {
+  constructor(){ this._luma=0.5; this._fc=0; this._filter=''; this._oc=null; }
+
+  measure(camCanvas, W, H, lms) {
+    this._fc++;
+    if (this._fc % 15 !== 0) return this._filter;
+    if (!this._oc) this._oc = new OffscreenCanvas(32, 32);
+    const sc = this._oc.getContext('2d');
+    const fX = lms?.[10] ? Math.round((1-lms[10].x)*W) : W/2;
+    const fY = lms?.[10] ? Math.round(lms[10].y*H) : H*0.18;
+    const sx = Math.max(0,Math.min(W-32,fX-16))|0;
+    const sy = Math.max(0,Math.min(H-32,fY-16))|0;
+    try { sc.drawImage(camCanvas, sx, sy, 32, 32, 0, 0, 32, 32); } catch(e) { return this._filter; }
+    const px = sc.getImageData(0,0,32,32).data;
+    let sumY=0;
+    for(let i=0;i<px.length;i+=4) sumY += 0.299*px[i]+0.587*px[i+1]+0.114*px[i+2];
+    const raw = (sumY/(32*32))/255;
+    this._luma = 0.08*raw + 0.92*this._luma;
+    const t = this._luma;
+    const brightness = (0.72 + t*0.56).toFixed(3);
+    const contrast   = (1.18 - t*0.30).toFixed(3);
+    const saturate   = (0.90 + t*0.20).toFixed(3);
+    this._filter = `brightness(${brightness}) contrast(${contrast}) saturate(${saturate})`;
+    // Update UI
+    const h=Math.round(220-t*220), l=Math.round(25+t*50);
+    const tc=document.getElementById('tone-chip');
+    if(tc){ tc.style.display='flex'; tc.style.color=`hsl(${h},70%,${l+20}%)`; }
+    UI.vl('tone-val', (t*100).toFixed(0)+'%');
+    UI.vl('sw-tone-stat', (t*100).toFixed(0)+'%');
+    const ld=document.getElementById('luma-dot');
+    if(ld){ ld.style.background=`hsl(${h},80%,${l}%)`;ld.style.boxShadow=`0 0 5px hsl(${h},80%,${l}%)`; }
+    UI.flag('flag-autotone','on');
+    return this._filter;
+  }
+  get filter(){ return this._filter; }
+}
+
+/* Sparkline */
+class Sparkline {
+  constructor(id,color='#818cf8'){ this._el=document.getElementById(id);this._c=color;this._d=new Float32Array(120).fill(0);this._h=0; }
+  push(ms){ this._d[this._h%120]=ms;this._h++;this._draw(); }
+  _draw(){
+    if(!this._el)return;
+    const W=this._el.offsetWidth||240,H=50;
+    this._el.width=W;this._el.height=H;
+    const ctx=this._el.getContext('2d');ctx.clearRect(0,0,W,H);
+    const max=Math.max(40,...Array.from(this._d)),bw=W/120;
+    for(let i=0;i<120;i++){
+      const idx=((this._h-120+i)%120+120)%120,v=this._d[idx],bh=(v/max)*(H-4);
+      ctx.fillStyle=v>=33.3?'#ef4444':v>=20?'#f59e0b':this._c;
+      ctx.globalAlpha=.78;ctx.fillRect(i*bw,H-bh,bw-1,bh);
+    }
+    ctx.globalAlpha=.15;ctx.strokeStyle='#fff';ctx.lineWidth=1;
+    [16.7,33.3].forEach(ms=>{const y=H-(ms/max)*(H-4);ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();});
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   VIDEO RECORDER (MediaRecorder + captureStream)
+───────────────────────────────────────────────────────────── */
+const Recorder = {
+  _rec:null, _chunks:[], _ts:0, _timer:null, _prefix:null, recording:false,
+  _mime(){ return ['video/webm;codecs=vp9,opus','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'video/webm'; },
+  start(canvas, prefix) {
+    if(this.recording)return;
+    if(!canvas.width){UI.notif('','Inicie a câmera antes de gravar');return;}
+    this._prefix=prefix;this._chunks=[];
+    let stream;
+    try{stream=canvas.captureStream(30);}catch(e){UI.notif('','captureStream não suportado');return;}
+    try{this._rec=new MediaRecorder(stream,{mimeType:this._mime(),videoBitsPerSecond:5_000_000});}
+    catch(e){this._rec=new MediaRecorder(stream);}
+    this._rec.ondataavailable=e=>{if(e.data.size>0)this._chunks.push(e.data);};
+    this._rec.onstop=()=>this._done();
+    this._rec.start(100);
+    this.recording=true;this._ts=Date.now();
+    this._setBtn(prefix,true,'00:00');
+    this._timer=setInterval(()=>{
+      const s=Math.floor((Date.now()-this._ts)/1000);
+      this._setBtn(prefix,true,String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'));
+    },1000);
+    UI.notif('','Gravação iniciada');
+  },
+  stop(){
+    if(!this.recording)return;
+    this.recording=false;clearInterval(this._timer);
+    this._rec.stop();this._setBtn(this._prefix,false,null);
+  },
+  _done(){
+    const blob=new Blob(this._chunks,{type:this._rec.mimeType||'video/webm'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`FaceMorph_${this._prefix}_${Date.now()}.webm`;a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    UI.notif('','Vídeo salvo · '+ Math.floor((Date.now()-this._ts)/1000)+'s');
+  },
+  _setBtn(px,rec,label){
+    const btn=document.getElementById(px+'-rec-btn');
+    if(!btn)return;
+    if(rec){ btn.classList.add('recording'); btn.dataset.tip=label?`REC ${label}`:'Gravando…'; }
+    else   { btn.classList.remove('recording'); btn.dataset.tip='Gravar'; }
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────
+   KEY LANDMARKS for Delaunay triangulation
+───────────────────────────────────────────────────────────── */
+const KEY_LMS=[10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,109,33,133,159,145,362,263,386,374,1,6,0,17,61,291,168];
+
+/* ─────────────────────────────────────────────────────────────
+   FACE SWAP RENDERER
+───────────────────────────────────────────────────────────── */
+class FaceSwapRenderer {
+  constructor(canvas){
+    this.canvas=canvas; this.ctx=canvas.getContext('2d');
+    this.faceImg=null; this.srcLms=null; this.triIdxs=null;
+    this.featherBitmap=null;
+    this._warpOC=null; this._warpCtx=null;
+    this._pf=null; this._rafId=null;
+    this.smoother=new LandmarkSmoother(0.35);
+    this.toneEng=new AutoToneEngine();
+    this._spark=null; this._frameTs=0; this._bmpCount=0;
+    this.opts={ mode:'warp',opacity:.9,scale:1.08,offsetY:0,feather:45,showLM:false,autoTone:true,zDepthSort:true };
+  }
+  set(k,v){ this.opts[k]=v; }
+  setMode(m,btn){ this.opts.mode=m; UI.segToggle(btn); UI.vl('sw-mode-disp',m.toUpperCase()); }
+  submitFrame(r){ this._pf=r; }
+
+  startLoop(){
+    this._spark=this._spark||new Sparkline('spark-canvas');
+    UI.flag('flag-raf','on');
+    const loop=(ts)=>{
+      if(this._pf){
+        const t0=performance.now();
+        this._render(this._pf);
+        const ms=performance.now()-t0;
+        this._pf=null;
+        this._spark.push(ms);
+        UI.vl('spark-val',ms.toFixed(1)+' ms');
+        UI.vl('pm-ft',ms.toFixed(2)+' ms');
+        if(this._frameTs){
+          const fps=Math.round(1000/(ts-this._frameTs));
+          const el=document.getElementById('pm-fps');
+          if(el){el.textContent=fps;el.className='m-val '+(fps>=50?'ok':fps>=30?'warn':'err');}
+          UI.vl('sw-fps',fps); UI.vl('sw-cv-fps',fps+' fps');
+        }
+        this._frameTs=ts;
+        if(performance.memory){
+          const mb=(performance.memory.usedJSHeapSize/1048576).toFixed(1);
+          const el=document.getElementById('pm-heap');
+          if(el){el.textContent=mb+' MB';el.className='m-val '+(mb<80?'ok':mb<150?'warn':'err');}
+        }
+        UI.vl('pm-bmp',this._bmpCount);
+        UI.vl('pm-tris',this.triIdxs?this.triIdxs.length:'—');
+        UI.vl('pm-sz',`${this.canvas.width}×${this.canvas.height}`);
+        UI.vl('sw-cv-sz',`${this.canvas.width}×${this.canvas.height}`);
+      }
+      this._rafId=requestAnimationFrame(loop);
+    };
+    this._rafId=requestAnimationFrame(loop);
+  }
+  stopLoop(){ if(this._rafId){cancelAnimationFrame(this._rafId);this._rafId=null;} this.smoother.reset(); }
+  setSourceFace(img,lms=null){
+    this.faceImg=img; this.srcLms=lms;
+    this._computeTri(); this.recomputeFeather(); this._updateWarpBar();
+  }
+  recomputeFeather(){
+    if(!this.faceImg)return;
+    const img=this.faceImg,W=img.naturalWidth||img.width,H=img.naturalHeight||img.height,fe=this.opts.feather;
+    const oc=new OffscreenCanvas(W,H),ox=oc.getContext('2d');
+    ox.drawImage(img,0,0);
+    if(fe>0){
+      ox.globalCompositeOperation='destination-in';
+      const cx=W/2,cy=H/2,r0=Math.min(W,H)/2*(1-fe/100),r1=Math.max(W,H)/2;
+      const g=ox.createRadialGradient(cx,cy,r0,cx,cy,r1);
+      g.addColorStop(0,'rgba(0,0,0,1)');g.addColorStop(1,'rgba(0,0,0,0)');
+      ox.fillStyle=g;ox.fillRect(0,0,W,H);
+    }
+    const rid=Symbol();this._crid=rid;
+    createImageBitmap(oc).then(bmp=>{
+      if(this._crid!==rid){bmp.close();return;}
+      if(this.featherBitmap){this.featherBitmap.close();this._bmpCount=Math.max(0,this._bmpCount-1);}
+      this.featherBitmap=bmp;this._bmpCount++;
+      UI.flag('flag-bitmap','on');UI.flag('flag-close','on');UI.vl('pm-bmp',this._bmpCount);
+    });
+  }
+  destroy(){
+    this.stopLoop();
+    if(this.featherBitmap){this.featherBitmap.close();this.featherBitmap=null;this._bmpCount=0;}
+    this._warpOC=null;this._warpCtx=null;
+  }
+  _computeTri(){
+    if(!this.srcLms){this.triIdxs=null;return;}
+    const iW=this.faceImg.naturalWidth||this.faceImg.width,iH=this.faceImg.naturalHeight||this.faceImg.height;
+    const pts=KEY_LMS.map(i=>[this.srcLms[i].x*iW,this.srcLms[i].y*iH]);
+    this.triIdxs=Delaunay.triangulate(pts).map(t=>[KEY_LMS[t[0]],KEY_LMS[t[1]],KEY_LMS[t[2]]]);
+  }
+  _updateWarpBar(){
+    const bar=document.getElementById('warp-bar'),dot=document.getElementById('wb-dot'),txt=document.getElementById('wb-txt');
+    if(!bar)return;
+    if(this.triIdxs?.length>0){
+      bar.style.display='flex';dot.className='wb-dot ok';
+      txt.textContent=`Warp ativo · ${this.triIdxs.length} tri · EMA α=${this.smoother._a.toFixed(2)}`;
+    } else if(this.faceImg){
+      bar.style.display='flex';dot.className='wb-dot warn';txt.textContent='Overlay mode';
+    } else bar.style.display='none';
+  }
+  _render(results){
+    const{canvas,ctx,opts}=this,W=canvas.width,H=canvas.height;if(!W||!H)return;
+    ctx.save();ctx.clearRect(0,0,W,H);ctx.translate(W,0);ctx.scale(-1,1);ctx.drawImage(results.image,0,0,W,H);ctx.restore();
+    const rawFaces=results.multiFaceLandmarks||[];
+    for(const rawLms of rawFaces){
+      const lms=this.smoother.smooth(rawLms);
+      UI.flag('flag-ema','on');
+      const toneFilter=opts.autoTone?this.toneEng.measure(canvas,W,H,lms):'';
+      if(opts.showLM){
+        ctx.fillStyle='rgba(90,92,245,.4)';
+        for(const l of lms){ctx.beginPath();ctx.arc((1-l.x)*W,l.y*H,.9,0,Math.PI*2);ctx.fill();}
+      }
+      if(!this.faceImg){
+        let x0=1,y0=1,x1=0,y1=0;
+        for(const l of lms){if(l.x<x0)x0=l.x;if(l.y<y0)y0=l.y;if(l.x>x1)x1=l.x;if(l.y>y1)y1=l.y;}
+        const bW=(x1-x0)*W*1.2,bH=(y1-y0)*H*1.25,cX=(1-(x0+x1)/2)*W,cY=(y0+y1)/2*H;
+        ctx.save();ctx.strokeStyle='rgba(90,92,245,.55)';ctx.lineWidth=1.5;ctx.shadowBlur=8;ctx.shadowColor='#5a5cf5';
+        ctx.strokeRect(cX-bW/2,cY-bH/2,bW,bH);ctx.restore();
+        continue;
+      }
+      if(opts.mode==='warp'&&this.triIdxs?.length>0) this._renderWarp(ctx,lms,W,H,toneFilter);
+      else this._renderOverlay(ctx,lms,W,H,toneFilter);
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     CORE: Z-DEPTH SORTING + OFFSCREEN BATCHING
+     ─────────────────────────────────────────────────────
+     Z-SORT (Painter's Algorithm):
+       1. For each triangle compute zAvg = avg of 3 landmark z values
+       2. Sort descending: large z (far) first, small/negative z (nose tip) last
+       3. Drawing far triangles first ensures near features render on top
+       Cost: sort ~70 elements ≈ O(70 log 70) = ~420 comparisons/frame
+
+     OFFSCREEN BATCH:
+       All triangles rasterized into OffscreenCanvas (face bbox only)
+       then single drawImage() onto main canvas → minimal DOM compositing
+  ════════════════════════════════════════════════════════ */
+  _renderWarp(mainCtx, lms, W, H, toneFilter){
+    const srcImg=this.featherBitmap||this.faceImg;
+    const iW=this.faceImg.naturalWidth||this.faceImg.width,iH=this.faceImg.naturalHeight||this.faceImg.height;
+
+    // Z-sort
+    let tris=this.triIdxs;
+    if(this.opts.zDepthSort && lms[0]?.z!==undefined){
+      tris=tris.map(t=>({t,z:((lms[t[0]]?.z??0)+(lms[t[1]]?.z??0)+(lms[t[2]]?.z??0))/3}))
+               .sort((a,b)=>b.z-a.z).map(a=>a.t);
+      UI.flag('flag-zsort','on');
+    }
+
+    // Bounding box subregion
+    let bx0=W,by0=H,bx1=0,by1=0;
+    for(const[i,j,k]of tris)for(const idx of[i,j,k]){
+      const sx=(1-lms[idx].x)*W,sy=lms[idx].y*H;
+      if(sx<bx0)bx0=sx;if(sy<by0)by0=sy;if(sx>bx1)bx1=sx;if(sy>by1)by1=sy;
+    }
+    const PAD=8;
+    bx0=Math.max(0,bx0-PAD)|0;by0=Math.max(0,by0-PAD)|0;
+    bx1=Math.min(W,bx1+PAD)|0;by1=Math.min(H,by1+PAD)|0;
+    const bW=bx1-bx0,bH=by1-by0;if(bW<=0||bH<=0)return;
+
+    if(!this._warpOC||this._warpOC.width!==bW||this._warpOC.height!==bH){
+      this._warpOC=new OffscreenCanvas(bW,bH);this._warpCtx=this._warpOC.getContext('2d');
+      UI.flag('flag-batch','on');
+    }
+    const oc=this._warpOC,ctx=this._warpCtx;
+    ctx.clearRect(0,0,bW,bH);
+
+    // Apply AutoTone filter on OC (OffscreenCanvas 2D supports ctx.filter in Chrome 94+)
+    ctx.filter=(toneFilter&&this.opts.autoTone)?toneFilter:'none';
+
+    // Rasterize all z-sorted tris
+    for(const[i,j,k]of tris){
+      const dTri=[[(1-lms[i].x)*W-bx0,lms[i].y*H-by0],[(1-lms[j].x)*W-bx0,lms[j].y*H-by0],[(1-lms[k].x)*W-bx0,lms[k].y*H-by0]];
+      const sTri=[[this.srcLms[i].x*iW,this.srcLms[i].y*iH],[this.srcLms[j].x*iW,this.srcLms[j].y*iH],[this.srcLms[k].x*iW,this.srcLms[k].y*iH]];
+      drawTri(ctx,srcImg,sTri,dTri);
+    }
+    ctx.filter='none';
+
+    // Single composite to main canvas
+    mainCtx.save();
+    mainCtx.globalAlpha=this.opts.opacity;
+    if(this.opts.mode==='screen')mainCtx.globalCompositeOperation='screen';
+    mainCtx.drawImage(oc,bx0,by0);
+    mainCtx.restore();
+  }
+
+  _renderOverlay(ctx,lms,W,H,toneFilter){
+    let x0=1,y0=1,x1=0,y1=0;
+    for(const l of lms){if(l.x<x0)x0=l.x;if(l.y<y0)y0=l.y;if(l.x>x1)x1=l.x;if(l.y>y1)y1=l.y;}
+    const fW=(x1-x0)*W,fH=(y1-y0)*H,cX=(1-(x0+x1)/2)*W,cY=(y0+y1)/2*H;
+    const le=lms[33],re=lms[263];
+    const angle=Math.atan2((re.y-le.y)*H,-(re.x-le.x)*W);
+    const size=Math.max(fW,fH)*1.45*this.opts.scale,oy=this.opts.offsetY*(fH/80);
+    const src=this.featherBitmap||this.faceImg;
+    ctx.save();ctx.translate(cX,cY+oy);ctx.rotate(angle);ctx.globalAlpha=this.opts.opacity;
+    if(this.opts.mode==='screen')ctx.globalCompositeOperation='screen';
+    if(toneFilter&&this.opts.autoTone)ctx.filter=toneFilter;
+    ctx.drawImage(src,-size/2,-size/2,size,size);
+    ctx.filter='none';ctx.restore();
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   POSE RENDERER
+───────────────────────────────────────────────────────────── */
+const THEMES={
+  neon:{head:'#00f5ff',torso:'#f472b6',arms:'#fbbf24',legs:'#34d399',com:'#fb923c'},
+  fire:{head:'#ffcc00',torso:'#ff3300',arms:'#ffaa00',legs:'#ff0055',com:'#fff'},
+  ghost:{head:'rgba(255,255,255,.75)',torso:'rgba(200,220,255,.6)',arms:'rgba(255,200,255,.6)',legs:'rgba(180,255,180,.6)',com:'rgba(255,255,100,.8)'},
+};
+const P_CONNS=[[0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],[11,12],[11,23],[12,24],[23,24],[12,14],[14,16],[16,18],[16,20],[18,20],[11,13],[13,15],[15,17],[15,19],[17,19],[24,26],[26,28],[28,30],[28,32],[30,32],[23,25],[25,27],[27,29],[27,31],[29,31]];
+function pConnCol(i,j,th){
+  const t=THEMES[th];if(i<=10&&j<=10)return t.head;
+  const mn=Math.min(i,j),mx=Math.max(i,j);
+  if(mn>=11&&mx<=12||mn>=23&&mx<=24)return t.torso;
+  if(mn>=11&&mx<=24&&(mn<=12||mn>=23))return t.torso;
+  if(mn>=13&&mx<=20)return t.arms;if(mn>=11&&mx<=20)return t.arms;
+  if(mn>=25||mx>=25)return t.legs;return t.head;
+}
+class PoseRenderer {
+  constructor(canvas){
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');
+    this._trail=null;this._pf=null;this._rafId=null;
+    this.opts={mode:'both',theme:'neon',pointR:6,lineW:3,glow:14,trail:true};
+  }
+  set(k,v){this.opts[k]=v;}
+  setMode(m,btn){this.opts.mode=m;UI.segToggle(btn);}
+  setTheme(t,btn){this.opts.theme=t;UI.segToggle(btn);}
+  submitFrame(r){this._pf=r;}
+  startLoop(){const loop=()=>{if(this._pf){this._render(this._pf);this._pf=null;}this._rafId=requestAnimationFrame(loop);};this._rafId=requestAnimationFrame(loop);}
+  stopLoop(){if(this._rafId){cancelAnimationFrame(this._rafId);this._rafId=null;}this._trail=null;}
+  _render(res){
+    const{canvas,ctx,opts}=this,W=canvas.width,H=canvas.height;if(!W||!H)return;
+    const T=THEMES[opts.theme];ctx.clearRect(0,0,W,H);
+    if(opts.mode!=='skel'){ctx.save();ctx.translate(W,0);ctx.scale(-1,1);ctx.globalAlpha=opts.mode==='both'?.6:1;ctx.drawImage(res.image,0,0,W,H);ctx.restore();}
+    if(!res.poseLandmarks)return;
+    const lms=res.poseLandmarks,vis=lms.filter(l=>(l.visibility||0)>.3).length;
+    if(opts.trail){
+      if(!this._trail||this._trail.width!==W)this._trail=new OffscreenCanvas(W,H);
+      const tc=this._trail.getContext('2d');tc.fillStyle='rgba(8,8,15,.2)';tc.fillRect(0,0,W,H);
+      tc.save();tc.translate(W,0);tc.scale(-1,1);
+      for(const l of lms){if((l.visibility||0)<.5)continue;tc.beginPath();tc.arc(l.x*W,l.y*H,1.5,0,Math.PI*2);tc.fillStyle=T.head;tc.globalAlpha=.18;tc.shadowBlur=4;tc.shadowColor=T.head;tc.fill();}
+      tc.restore();ctx.drawImage(this._trail,0,0);
+    }
+    ctx.save();ctx.translate(W,0);ctx.scale(-1,1);
+    for(const[i,j]of P_CONNS){
+      const a=lms[i],b=lms[j];if(!a||!b)continue;
+      const v=Math.min(a.visibility||0,b.visibility||0);if(v<.2)continue;
+      const c=pConnCol(i,j,opts.theme);
+      ctx.beginPath();ctx.moveTo(a.x*W,a.y*H);ctx.lineTo(b.x*W,b.y*H);
+      ctx.strokeStyle=c;ctx.lineWidth=opts.lineW;ctx.globalAlpha=v*.9;ctx.shadowBlur=opts.glow;ctx.shadowColor=c;ctx.stroke();
+    }
+    for(let i=0;i<lms.length;i++){
+      const l=lms[i],v=l.visibility||0;if(v<.25)continue;
+      const c=pConnCol(i,i,opts.theme);
+      ctx.beginPath();ctx.arc(l.x*W,l.y*H,opts.pointR/2,0,Math.PI*2);ctx.fillStyle=c;ctx.globalAlpha=v;ctx.shadowBlur=opts.glow*1.2;ctx.shadowColor=c;ctx.fill();
+      ctx.beginPath();ctx.arc(l.x*W,l.y*H,opts.pointR/4,0,Math.PI*2);ctx.fillStyle='#fff';ctx.globalAlpha=v*.55;ctx.shadowBlur=0;ctx.fill();
+    }
+    if(lms[11]&&lms[12]&&lms[23]&&lms[24]){
+      const cx=(lms[11].x+lms[12].x+lms[23].x+lms[24].x)/4*W,cy=(lms[11].y+lms[12].y+lms[23].y+lms[24].y)/4*H;
+      ctx.beginPath();ctx.arc(cx,cy,6,0,Math.PI*2);ctx.strokeStyle=T.com;ctx.lineWidth=2;ctx.globalAlpha=.85;ctx.shadowBlur=15;ctx.shadowColor=T.com;ctx.stroke();
+      ctx.beginPath();ctx.arc(cx,cy,2,0,Math.PI*2);ctx.fillStyle=T.com;ctx.fill();
+    }
+    ctx.restore();
+    UI.vl('po-jts',vis);UI.vl('po-acc',Math.round(vis/33*100)+'%');
+    UI.vl('po-cv-fps',vis>0?vis+' pts':'—');
+  }
+}
+
+class CameraManager {
+  constructor(W=640,H=480){this.W=W;this.H=H;this._v=null;this._c=null;this._s=null;}
+  async start(onFrame){
+    this._v=document.createElement('video');this._v.autoplay=true;this._v.muted=true;this._v.playsInline=true;
+    this._s=await navigator.mediaDevices.getUserMedia({video:{width:this.W,height:this.H}});
+    this._v.srcObject=this._s;
+    return new Promise((res,rej)=>{
+      this._v.onloadedmetadata=()=>{
+        this._c=new Camera(this._v,{onFrame:async()=>{await onFrame(this._v);},width:this.W,height:this.H});
+        this._c.start();res({width:this._v.videoWidth||this.W,height:this._v.videoHeight||this.H});
+      };
+      this._v.onerror=rej;
+    });
+  }
+  stop(){if(this._c)this._c.stop();if(this._s)this._s.getTracks().forEach(t=>t.stop());this._v=null;this._c=null;this._s=null;}
+}
+
+/* ─── INSTANCES ─── */
+const SwapR = new FaceSwapRenderer(document.getElementById('sw-canvas'));
+const PoseR  = new PoseRenderer(document.getElementById('po-canvas'));
+
+/* ─── APP CONTROLLER ─── */
+const App = {
+  _swR:false,_poR:false,_swCam:null,_poCam:null,
+  _poFPS:{last:0,count:0,fps:0}, _cur:'hub',
+
+  nav(page,btn){
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.getElementById('page-'+page).classList.add('active');
+    document.querySelectorAll('.nav-pill').forEach(b=>b.classList.remove('active'));
+    if(btn)btn.classList.add('active');
+    this._cur=page;
+    const sb=document.getElementById('main-sidebar');
+    const ss=document.getElementById('sb-swap'),sm=document.getElementById('sb-motion');
+    if(page==='hub'){sb.style.display='none';}
+    else{sb.style.display='flex';ss.style.display=page==='swap'?'flex':'none';sm.style.display=page==='motion'?'flex':'none';}
+  },
+
+  openHistory(){
+    const p=this._cur;
+    if(p==='swap')switchTab('swap',2,document.querySelectorAll('#swap-stabs .stab')[2]);
+    else if(p==='motion')switchTab('motion',1,document.querySelectorAll('#motion-stabs .stab')[1]);
+    else this.nav('swap',document.getElementById('nt-swap'));
+  },
+
+  _pTick(){
+    const fps=this._poFPS,now=performance.now();fps.count++;
+    if(now-fps.last>=800){fps.fps=Math.round(fps.count*1000/(now-fps.last));fps.count=0;fps.last=now;}
+    return fps.fps;
+  },
+
+  toggleRecord(px){
+    const canvas=document.getElementById(px+'-canvas');
+    if(Recorder.recording&&Recorder._prefix===px)Recorder.stop();
+    else{if(Recorder.recording)Recorder.stop();Recorder.start(canvas,px);}
+  },
+
+  toggleFlip(px){
+    const shell=document.getElementById(px+'-shell');
+    const btn=document.getElementById(px+'-flip-btn');
+    if(!shell)return;
+    const f=shell.dataset.flipped==='true';
+    shell.style.transform=f?'':'scaleX(-1)';shell.dataset.flipped=String(!f);
+    if(btn){btn.style.opacity=f?'.6':'1';btn.style.filter=f?'':'hue-rotate(180deg) brightness(1.3)';}
+    UI.notif('',f?'Câmera restaurada':'Câmera espelhada');
+  },
+
+  toggleLandmarks(){
+    const v=!SwapR.opts.showLM;SwapR.set('showLM',v);
+    const tog=document.getElementById('tog-lm');if(tog)tog.classList.toggle('on',v);
+    const btn=document.getElementById('sw-lm-btn');if(btn)btn.classList.toggle('dim',!v);
+  },
+
+  _setRunIcon(px,running){
+    const svg=document.getElementById(px+'-run-svg');const btn=document.getElementById(px+'-dock-run');
+    if(!svg)return;
+    svg.innerHTML=running
+      ?'<rect x="4.5" y="4.5" width="11" height="11" rx="2" class="filled"/>'
+      :'<polygon points="5,3.5 16.5,10 5,16.5" class="filled"/>';
+    if(btn)btn.dataset.tip=running?'Parar':'Iniciar';
+  },
+
+  async toggleSwap(){
+    if(this._swR){this._stopSwap();return;}
+    document.getElementById('sw-loader').classList.remove('hide');
+    UI.status('sw-sdot','sw-smsg','warn','Iniciando câmera…');
+    setBadge('proc','Processando');setCvBadge('sw','proc','Processando');
+
+    const fm=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+    fm.setOptions({maxNumFaces:2,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+    fm.onResults(r=>{
+      SwapR.submitFrame(r);
+      const n=(r.multiFaceLandmarks||[]).length;UI.vl('sw-faces',n);
+      if(n>0){setCvBadge('sw','live','Live');setBadge('live','Live');}
+    });
+
+    this._swCam=new CameraManager(640,480);
+    try{
+      const{width,height}=await this._swCam.start(frame=>fm.send({image:frame}));
+      const cv=document.getElementById('sw-canvas');cv.width=width;cv.height=height;
+      SwapR.startLoop();this._swR=true;
+      document.getElementById('sw-loader').classList.add('hide');
+      document.getElementById('sw-btn').textContent='⏹ Parar';
+      document.getElementById('sw-btn').classList.add('run');
+      UI.status('sw-sdot','sw-smsg','ok','FaceMesh · EMA · Z-sort · AutoTone');
+      UI.vl('sw-mode-disp',SwapR.opts.mode.toUpperCase());
+      this._setRunIcon('sw',true);
+      UI.notif('','Face Swap PRO iniciado');
+    }catch(e){
+      document.getElementById('sw-loader').classList.add('hide');
+      UI.status('sw-sdot','sw-smsg','err','Câmera negada');
+      setBadge('idle','Inativo');setCvBadge('sw','idle','Inativo');
+      UI.notif('','Câmera negada');
+    }
+  },
+
+  _stopSwap(){
+    this._swR=false;
+    if(Recorder.recording&&Recorder._prefix==='sw')Recorder.stop();
+    SwapR.destroy();if(this._swCam){this._swCam.stop();this._swCam=null;}
+    document.getElementById('sw-btn').textContent='▶ Iniciar Face Swap';
+    document.getElementById('sw-btn').classList.remove('run');
+    UI.status('sw-sdot','sw-smsg','','Câmera parada');
+    setBadge('idle','Inativo');setCvBadge('sw','idle','Inativo');
+    this._setRunIcon('sw',false);
+    const tc=document.getElementById('tone-chip');if(tc)tc.style.display='none';
+  },
+
+  async togglePose(){
+    if(this._poR){this._stopPose();return;}
+    document.getElementById('po-loader').classList.remove('hide');
+    UI.status('po-sdot','po-smsg','warn','Iniciando pose engine…');
+    setBadge('proc','Processando');setCvBadge('po','proc','Processando');
+
+    const pm=new Pose({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`});
+    pm.setOptions({modelComplexity:1,smoothLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+    pm.onResults(r=>{
+      PoseR.submitFrame(r);
+      const fps=this._pTick();
+      UI.vl('po-fps',fps<300?fps:'—');UI.vl('po-cv-fps',(fps<300?fps:'—')+' fps');
+      if(r.poseLandmarks){setBadge('live','Live');setCvBadge('po','live','Live');}
+    });
+
+    this._poCam=new CameraManager(640,480);
+    try{
+      const{width,height}=await this._poCam.start(frame=>pm.send({image:frame}));
+      const cv=document.getElementById('po-canvas');cv.width=width;cv.height=height;
+      PoseR.startLoop();this._poR=true;
+      document.getElementById('po-loader').classList.add('hide');
+      document.getElementById('po-btn').textContent='⏹ Parar';
+      document.getElementById('po-btn').classList.add('run');
+      UI.status('po-sdot','po-smsg','ok','Pose engine · 33 joints');
+      this._setRunIcon('po',true);
+      UI.notif('','Motion Capture PRO iniciado');
+    }catch(e){
+      document.getElementById('po-loader').classList.add('hide');
+      UI.status('po-sdot','po-smsg','err','Câmera negada');
+      setBadge('idle','Inativo');setCvBadge('po','idle','Inativo');
+      UI.notif('','Câmera negada');
+    }
+  },
+
+  _stopPose(){
+    this._poR=false;
+    if(Recorder.recording&&Recorder._prefix==='po')Recorder.stop();
+    PoseR.stopLoop();if(this._poCam){this._poCam.stop();this._poCam=null;}
+    document.getElementById('po-btn').textContent='▶ Iniciar Motion Capture';
+    document.getElementById('po-btn').classList.remove('run');
+    UI.status('po-sdot','po-smsg','','Motion tracker parado');
+    setBadge('idle','Inativo');setCvBadge('po','idle','Inativo');
+    this._setRunIcon('po',false);
+  },
+
+  capture(px){
+    const cv=document.getElementById(px+'-canvas');
+    if(!cv.width){UI.notif('','Inicie a câmera antes de capturar');return;}
+    // Flash micro-interaction
+    triggerFlash(px);
+    const dataUrl=cv.toDataURL('image/png');
+    const name=px==='sw'?'FaceSwap_PRO':'Motion_PRO';
+    addToGal(name+'_'+Date.now(),dataUrl,px);
+    const a=document.createElement('a');a.download=name+'_'+Date.now()+'.png';a.href=dataUrl;a.click();
+    UI.notif('','Screenshot salvo');
+  },
+
+  captureActive(){
+    if(this._cur==='swap')this.capture('sw');
+    else if(this._cur==='motion')this.capture('po');
+    else UI.notif('','Abra Face Swap ou Motion para capturar');
+  }
+};
+
+/* Face upload */
+document.getElementById('sw-file').addEventListener('change',function(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const img=new Image();
+    img.onload=async()=>{
+      document.getElementById('face-prev').src=ev.target.result;
+      document.getElementById('face-prev').style.display='block';
+      document.getElementById('face-row-wrap').style.display='flex';
+      const zone=document.getElementById('sw-upzone');
+      zone.querySelector('.uz-main').textContent='Rosto carregado';
+      zone.querySelector('.uz-sub').textContent='Clique para trocar';
+      zone.style.borderColor='var(--in2)';
+      const bar=document.getElementById('warp-bar');
+      bar.style.display='flex';
+      document.getElementById('wb-dot').className='wb-dot warn';
+      document.getElementById('wb-txt').textContent='Detectando landmarks…';
+      SwapR.setSourceFace(img,null);
+      try{
+        const lm=await detectFace(img);
+        SwapR.setSourceFace(img,lm);
+        UI.notif('',lm?`Warp ativo · ${SwapR.triIdxs?.length||0} tri`:'Overlay mode');
+      }catch{UI.notif('','Modo overlay');}
+    };
+    img.src=ev.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+async function detectFace(imgEl){
+  const c=document.createElement('canvas');
+  c.width=imgEl.naturalWidth||imgEl.width;c.height=imgEl.naturalHeight||imgEl.height;
+  c.getContext('2d').drawImage(imgEl,0,0);
+  return new Promise(resolve=>{
+    const fm=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+    fm.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.4,minTrackingConfidence:.4});
+    fm.onResults(r=>resolve(r.multiFaceLandmarks?.[0]||null));
+    fm.send({image:c}).catch(()=>resolve(null));
+  });
+}
+
+/* Boot */
+document.addEventListener('DOMContentLoaded',()=>{
+  DockHide.init('sw');
+  DockHide.init('po');
+});
+</script>
+</body>
+</html>
